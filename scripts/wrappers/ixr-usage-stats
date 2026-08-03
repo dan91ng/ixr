@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/python3 /opt/ixr-manager/bin/ixr_usage_stats.py

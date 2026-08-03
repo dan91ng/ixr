@@ -1,0 +1,8 @@
+{
+  "updated_at": 0,
+  "fail_threshold": 3,
+  "recover_threshold": 2,
+  "targets": [],
+  "dn42_targets": [],
+  "nodes": {}
+}

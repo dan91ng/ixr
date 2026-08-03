@@ -1,0 +1,7 @@
+[Unit]
+Description=IXR outbound health check
+After=network-online.target xray.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flock -n /run/ixr-health-check.lock /usr/local/bin/ixr-health-check

@@ -1,0 +1,7 @@
+{
+  "default_address": "proxy.example.com",
+  "aliases": {
+    "10186": "IXR-10186",
+    "10187": "IXR-10187"
+  }
+}

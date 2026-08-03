@@ -1,0 +1,15 @@
+server {
+    listen ${IXR_WEB_PORT};
+    listen [::]:${IXR_WEB_PORT};
+    server_name ${IXR_DOMAIN};
+    root /opt/ixr-manager/public;
+    index index.php;
+    client_max_body_size 2m;
+
+    location / { try_files $uri /index.php$is_args$args; }
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:${PHP_FPM_SOCK};
+    }
+    location ~ /\. { deny all; }
+}

@@ -1,0 +1,18 @@
+# runtime/private data
+src/ixr-manager/data/*.json
+!src/ixr-manager/data/*.example.json
+!src/ixr-manager/data/.gitkeep
+
+# generated/cache
+*.tar.gz
+*.zip
+*.log
+*.tmp
+__pycache__/
+*.pyc
+
+# local editor/system
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

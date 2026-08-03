@@ -1,0 +1,11 @@
+{
+  "updated_at": 0,
+  "available": false,
+  "stats_since_at": 0,
+  "basis": "example only",
+  "total_bytes": 0,
+  "port_total_bytes": 0,
+  "nodes": [],
+  "ports": [],
+  "outbounds_by_port": []
+}

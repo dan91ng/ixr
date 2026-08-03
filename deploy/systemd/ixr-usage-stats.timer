@@ -1,0 +1,11 @@
+[Unit]
+Description=Run IXR outbound usage stats collector every minute
+
+[Timer]
+OnActiveSec=60s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=ixr-usage-stats.service
+
+[Install]
+WantedBy=timers.target

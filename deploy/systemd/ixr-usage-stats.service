@@ -1,0 +1,7 @@
+[Unit]
+Description=IXR outbound usage stats collector
+After=xray.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ixr-usage-stats
