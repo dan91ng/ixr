@@ -1,5 +1,6 @@
 *.sh text eol=lf
 *.py text eol=lf
+*.php text eol=lf
 scripts/wrappers/* text eol=lf
 deploy/systemd/* text eol=lf
 deploy/nginx/* text eol=lf

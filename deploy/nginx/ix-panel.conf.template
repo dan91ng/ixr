@@ -1,0 +1,21 @@
+server {
+    listen ${IX_PANEL_WEB_PORT};
+    listen [::]:${IX_PANEL_WEB_PORT};
+    server_name ${IX_PANEL_DOMAIN};
+
+    root /opt/ix-panel/public;
+    index index.php index.html;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:${PHP_FPM_SOCK};
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+}

@@ -13,8 +13,9 @@ This project is provided for lawful self-hosting, learning, and network manageme
 - `src/ixr-manager/public/index.php` - Web UI
 - `src/ixr-manager/bin/` - IXR apply, health check, usage stats and async helpers
 - `src/ixr-manager/data/*.example.json` - safe example configs
+- `src/ix-panel/public/` - sanitized legacy IX V2Ray panel
 - `deploy/systemd/` - systemd service/timer templates
-- `deploy/nginx/` - Nginx site template
+- `deploy/nginx/` - Nginx site templates
 - `scripts/wrappers/` - `/usr/local/bin/ixr-*` wrappers
 - `install.sh` - source checkout installer
 
@@ -51,3 +52,15 @@ Then run:
 - Private server IPs/domains
 - Runtime `health.json`, `usage.json`, `apply_status.json`
 - Generated `/usr/local/etc/xray/config.json`
+
+## Legacy IX panel
+
+The legacy IX panel is kept under `src/ix-panel/public/` as a sanitized companion app for existing 233boy V2Ray deployments. Configure secrets and public domains with environment variables or replace the example values during deployment.
+
+Common environment variables:
+
+- `IX_PANEL_ADMIN_USER`
+- `IX_PANEL_ADMIN_PASSWORD`
+- `IX_PANEL_FRONT_PASSWORD`
+- `IX_PANEL_FRONT_ENTRY_HOST`
+- `IX_PANEL_PUBLIC_BASE_URL`
