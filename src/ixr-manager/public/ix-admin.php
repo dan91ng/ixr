@@ -729,9 +729,34 @@ function display_front_page() {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         .modal-enter { opacity: 1; transform: scale(1); }
+        :root { --ixr-bg:#f4f7fb; --ixr-card:#fff; --ixr-text:#172033; --ixr-muted:#64748b; --ixr-line:#e5eaf3; --ixr-blue:#2563eb; --ixr-purple:#7c3aed; --ixr-green:#16a34a; --ixr-red:#ef4444; --ixr-shadow:0 12px 30px #1f293714; }
+        body.ix-admin-integrated { background: var(--ixr-bg) !important; color: var(--ixr-text); padding: 0 0 24px !important; }
+        body.ix-admin-integrated[data-embedded="1"] { background: transparent !important; }
+        body.ix-admin-integrated .glass-nav { position: static !important; margin: 0 0 16px; padding: 20px 22px !important; background: linear-gradient(135deg,var(--ixr-blue),var(--ixr-purple)) !important; border: 0 !important; border-radius: 22px; box-shadow: 0 16px 36px #1f293722; }
+        body.ix-admin-integrated .glass-nav > div { max-width: none !important; }
+        body.ix-admin-integrated .glass-nav button, body.ix-admin-integrated .glass-nav a { border: 1px solid rgba(255,255,255,.18) !important; background: rgba(15,23,42,.26) !important; color: #fff !important; border-radius: 12px !important; box-shadow: none !important; }
+        body.ix-admin-integrated .glass-nav button:hover, body.ix-admin-integrated .glass-nav a:hover { background: rgba(15,23,42,.38) !important; transform: translateY(-1px); }
+        body.ix-admin-integrated .ix-admin-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin: 0 0 16px; }
+        body.ix-admin-integrated .ix-admin-metric { background:#fff; border:1px solid var(--ixr-line); border-radius:16px; padding:14px 16px; box-shadow:var(--ixr-shadow); }
+        body.ix-admin-integrated .ix-admin-metric span { display:block; color:var(--ixr-muted); font-size:12px; font-weight:800; }
+        body.ix-admin-integrated .ix-admin-metric b { display:block; margin-top:4px; color:var(--ixr-text); font-size:24px; line-height:1; }
+        body.ix-admin-integrated .ix-admin-layout { max-width:none !important; margin: 0 !important; padding: 0 !important; gap:16px !important; }
+        body.ix-admin-integrated .ix-card, body.ix-admin-integrated .ix-card-like { background:var(--ixr-card) !important; border:1px solid #edf1f7 !important; border-radius:18px !important; box-shadow:var(--ixr-shadow) !important; overflow:hidden; }
+        body.ix-admin-integrated .ix-card > div:first-child, body.ix-admin-integrated .ix-card-like > div:first-child { background:#fbfdff !important; border-color:var(--ixr-line) !important; }
+        body.ix-admin-integrated input, body.ix-admin-integrated select { border:1px solid #d8deea !important; border-radius:12px !important; background:#fff !important; }
+        body.ix-admin-integrated input:focus, body.ix-admin-integrated select:focus { box-shadow:0 0 0 3px #2563eb22 !important; border-color:var(--ixr-blue) !important; }
+        body.ix-admin-integrated button { border-radius:11px !important; font-weight:900 !important; transition:.18s ease; }
+        body.ix-admin-integrated button:hover { filter:brightness(.97); }
+        body.ix-admin-integrated button.bg-slate-800, body.ix-admin-integrated button.bg-indigo-600, body.ix-admin-integrated button.bg-purple-600 { background:linear-gradient(135deg,var(--ixr-blue),var(--ixr-purple)) !important; color:#fff !important; box-shadow:0 8px 18px #2563eb28 !important; }
+        body.ix-admin-integrated table { min-width:760px; border-collapse:collapse !important; }
+        body.ix-admin-integrated thead, body.ix-admin-integrated .table-header { background:#f8fafc !important; backdrop-filter:none !important; }
+        body.ix-admin-integrated th, body.ix-admin-integrated td { border-color:var(--ixr-line) !important; padding:12px 14px !important; }
+        body.ix-admin-integrated tbody tr:hover { background:#eef2ff66 !important; }
+        body.ix-admin-integrated .modal-enter { opacity:1; transform:scale(1); }
+        body.ix-admin-integrated #nodeModalCard, body.ix-admin-integrated #clientModalCard, body.ix-admin-integrated #passwordModalCard, body.ix-admin-integrated #subscriptionModalCard { border:1px solid #edf1f7; border-radius:18px !important; box-shadow:0 24px 70px #11182730 !important; }
     </style>
 </head>
-<body class="text-slate-800 antialiased selection:bg-indigo-100 selection:text-indigo-900 pb-16 relative">
+<body class="text-slate-800 antialiased selection:bg-indigo-100 selection:text-indigo-900 pb-16 relative ix-admin-integrated" data-embedded="<?=isset($_GET['embedded']) ? '1' : '0'?>">
     
     <!-- 顶部导航栏 -->
     <nav class="glass-nav text-white px-6 py-4 sticky top-0 z-40 shadow-sm">
@@ -766,13 +791,20 @@ function display_front_page() {
         </div>
     </nav>
 
+    <div class="ix-admin-summary">
+        <div class="ix-admin-metric"><span>Nodes</span><b id="ixNodeCount">--</b></div>
+        <div class="ix-admin-metric"><span>Clients</span><b id="ixClientCount">--</b></div>
+        <div class="ix-admin-metric"><span>Bindings</span><b id="ixBoundCount">--</b></div>
+        <div class="ix-admin-metric"><span>Inbound Port</span><b id="ixInboundMetric">--</b></div>
+    </div>
+
     <!-- 主容器 -->
-    <div class="max-w-[1500px] mx-auto mt-8 px-4 grid grid-cols-1 xl:grid-cols-12 gap-8">
+    <div class="ix-admin-layout max-w-[1500px] mx-auto mt-8 px-4 grid grid-cols-1 xl:grid-cols-12 gap-8">
         
         <!-- 左侧：节点与路由区 (比例 7) -->
         <div class="xl:col-span-7 space-y-6">
             
-            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+            <div class="ix-card bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
                 <div class="flex items-center justify-between mb-5">
                     <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-link mr-2 text-indigo-500 bg-indigo-50 p-2 rounded-lg"></i>快速导入落地节点</h3>
                 </div>
@@ -785,7 +817,7 @@ function display_front_page() {
                 </div>
             </div>
 
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow flex flex-col">
+            <div class="ix-card bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow flex flex-col">
                 <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                     <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-server mr-2 text-blue-500 bg-blue-50 p-2 rounded-lg"></i>落地节点配置</h3>
                     <span class="text-xs font-medium text-slate-500 bg-white border px-3 py-1 rounded-full shadow-sm">点击行复制客户端配置 | 点击标签编辑 | 点击UUID复制</span>
@@ -808,7 +840,7 @@ function display_front_page() {
 
         <!-- 右侧：入站用户区 (比例 5) -->
         <div class="xl:col-span-5 flex flex-col gap-6">
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow flex flex-col h-full">
+            <div class="ix-card bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow flex flex-col h-full">
                 <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                     <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-users mr-2 text-purple-500 bg-purple-50 p-2 rounded-lg"></i>前端用户配置</h3>
                     <span class="text-xs font-medium text-slate-500 bg-white border px-3 py-1 rounded-full shadow-sm">点击整行编辑前端连接UUID | 点击UUID复制</span>
@@ -1026,6 +1058,13 @@ function display_front_page() {
             nodesCache = res.nodes;
             currentInboundPort = res.inbound_port;
             document.getElementById('inboundPort').textContent = res.inbound_port;
+
+            const metric = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+            const boundCount = Object.values(res.bindings || {}).filter(Boolean).length;
+            metric('ixNodeCount', (res.nodes || []).length);
+            metric('ixClientCount', (res.clients || []).length);
+            metric('ixBoundCount', boundCount);
+            metric('ixInboundMetric', res.inbound_port || '--');
             
             const emailCounts = {};
             Object.values(res.bindings).forEach(email => { if (email) emailCounts[email] = (emailCounts[email] || 0) + 1; });
