@@ -6,6 +6,10 @@
 
 session_start();
 
+function h($value) {
+    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+}
+
 // ================= 配置区 =================
 define('ADMIN_USER', getenv('IX_PANEL_ADMIN_USER') ?: 'admin');          
 define('ADMIN_PASS', getenv('IX_PANEL_ADMIN_PASSWORD') ?: 'change-me');    
@@ -729,18 +733,33 @@ function display_front_page() {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         .modal-enter { opacity: 1; transform: scale(1); }
-        :root { --ixr-bg:#f4f7fb; --ixr-card:#fff; --ixr-text:#172033; --ixr-muted:#64748b; --ixr-line:#e5eaf3; --ixr-blue:#2563eb; --ixr-purple:#7c3aed; --ixr-green:#16a34a; --ixr-red:#ef4444; --ixr-shadow:0 12px 30px #1f293714; }
-        body.ix-admin-integrated { background: var(--ixr-bg) !important; color: var(--ixr-text); padding: 0 0 24px !important; }
-        body.ix-admin-integrated[data-embedded="1"] { background: transparent !important; }
-        body.ix-admin-integrated .glass-nav { position: static !important; margin: 0 0 16px; padding: 20px 22px !important; background: linear-gradient(135deg,var(--ixr-blue),var(--ixr-purple)) !important; border: 0 !important; border-radius: 22px; box-shadow: 0 16px 36px #1f293722; }
-        body.ix-admin-integrated .glass-nav > div { max-width: none !important; }
-        body.ix-admin-integrated .glass-nav button, body.ix-admin-integrated .glass-nav a { border: 1px solid rgba(255,255,255,.18) !important; background: rgba(15,23,42,.26) !important; color: #fff !important; border-radius: 12px !important; box-shadow: none !important; }
-        body.ix-admin-integrated .glass-nav button:hover, body.ix-admin-integrated .glass-nav a:hover { background: rgba(15,23,42,.38) !important; transform: translateY(-1px); }
-        body.ix-admin-integrated .ix-admin-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin: 0 0 16px; }
-        body.ix-admin-integrated .ix-admin-metric { background:#fff; border:1px solid var(--ixr-line); border-radius:16px; padding:14px 16px; box-shadow:var(--ixr-shadow); }
+        :root { --ixr-bg:#f4f7fb; --ixr-card:#fff; --ixr-text:#172033; --ixr-muted:#64748b; --ixr-line:#e5eaf3; --ixr-blue:#2563eb; --ixr-purple:#7c3aed; --ixr-green:#16a34a; --ixr-red:#ef4444; --ixr-amber:#f59e0b; --ixr-shadow:0 12px 30px #1f293714; }
+        body.ix-admin-integrated { background:var(--ixr-bg) !important; color:var(--ixr-text); padding:0 0 24px !important; }
+        body.ix-admin-integrated[data-embedded="1"] { background:transparent !important; }
+        body.ix-admin-integrated .glass-nav { position:static !important; margin:0 0 16px; padding:22px 24px !important; background:linear-gradient(135deg,var(--ixr-blue),var(--ixr-purple)) !important; border:0 !important; border-radius:22px; box-shadow:0 16px 36px #1f293722; color:#fff; }
+        body.ix-admin-integrated[data-embedded="1"] .glass-nav { background:var(--ixr-card) !important; color:var(--ixr-text); border:1px solid #edf1f7 !important; box-shadow:var(--ixr-shadow); }
+        body.ix-admin-integrated .ix-hero-inner { display:flex; align-items:center; justify-content:space-between; gap:18px; max-width:none; margin:0; }
+        body.ix-admin-integrated .ix-kicker { display:inline-flex; align-items:center; gap:8px; color:#dbeafe; font-size:12px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+        body.ix-admin-integrated[data-embedded="1"] .ix-kicker { color:var(--ixr-blue); }
+        body.ix-admin-integrated .ix-hero-title { margin:4px 0 6px; display:flex; align-items:center; gap:10px; font-size:25px; line-height:1.15; font-weight:950; color:inherit; }
+        body.ix-admin-integrated .ix-hero-title i { color:#bfdbfe; }
+        body.ix-admin-integrated[data-embedded="1"] .ix-hero-title i { color:var(--ixr-blue); }
+        body.ix-admin-integrated .ix-hero-subtitle { margin:0; color:#e0e7ff; font-size:14px; }
+        body.ix-admin-integrated[data-embedded="1"] .ix-hero-subtitle { color:var(--ixr-muted); }
+        body.ix-admin-integrated .ix-port-pill { margin-top:12px; display:inline-flex; align-items:center; gap:9px; border:1px solid rgba(255,255,255,.22); background:rgba(15,23,42,.24); color:#fff; border-radius:999px; padding:8px 12px; font-size:13px; font-weight:900; }
+        body.ix-admin-integrated[data-embedded="1"] .ix-port-pill { border-color:#dbe3ef; background:#f8fafc; color:#334155; }
+        body.ix-admin-integrated .ix-port-pill b { font-family:Consolas,monospace; color:inherit; }
+        body.ix-admin-integrated .ix-toolbar { display:flex; gap:9px; flex-wrap:wrap; justify-content:flex-end; }
+        body.ix-admin-integrated .ix-action { display:inline-flex; align-items:center; gap:8px; border:0 !important; border-radius:11px !important; padding:10px 13px !important; background:#eef2ff !important; color:#3730a3 !important; text-decoration:none; font-size:13px; font-weight:900 !important; box-shadow:none !important; transition:.18s ease; cursor:pointer; }
+        body.ix-admin-integrated .ix-action:hover { background:#e0e7ff !important; transform:translateY(-1px); filter:none !important; }
+        body.ix-admin-integrated .ix-action.primary { background:linear-gradient(135deg,var(--ixr-blue),var(--ixr-purple)) !important; color:#fff !important; box-shadow:0 8px 18px #2563eb28 !important; }
+        body.ix-admin-integrated .ix-action.danger { background:#fff1f2 !important; color:#be123c !important; }
+        body.ix-admin-integrated .ix-admin-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin:0 0 16px; }
+        body.ix-admin-integrated .ix-admin-metric { display:flex; align-items:center; gap:13px; background:#fff; border:1px solid var(--ixr-line); border-radius:18px; padding:15px 16px; box-shadow:var(--ixr-shadow); }
+        body.ix-admin-integrated .ix-admin-metric i { width:38px; height:38px; border-radius:13px; display:grid; place-items:center; color:#fff; background:linear-gradient(135deg,var(--ixr-blue),var(--ixr-purple)); box-shadow:0 8px 18px #2563eb25; }
         body.ix-admin-integrated .ix-admin-metric span { display:block; color:var(--ixr-muted); font-size:12px; font-weight:800; }
         body.ix-admin-integrated .ix-admin-metric b { display:block; margin-top:4px; color:var(--ixr-text); font-size:24px; line-height:1; }
-        body.ix-admin-integrated .ix-admin-layout { max-width:none !important; margin: 0 !important; padding: 0 !important; gap:16px !important; }
+        body.ix-admin-integrated .ix-admin-layout { max-width:none !important; margin:0 !important; padding:0 !important; gap:16px !important; align-items:start; }
         body.ix-admin-integrated .ix-card, body.ix-admin-integrated .ix-card-like { background:var(--ixr-card) !important; border:1px solid #edf1f7 !important; border-radius:18px !important; box-shadow:var(--ixr-shadow) !important; overflow:hidden; }
         body.ix-admin-integrated .ix-card > div:first-child, body.ix-admin-integrated .ix-card-like > div:first-child { background:#fbfdff !important; border-color:var(--ixr-line) !important; }
         body.ix-admin-integrated input, body.ix-admin-integrated select { border:1px solid #d8deea !important; border-radius:12px !important; background:#fff !important; }
@@ -750,52 +769,42 @@ function display_front_page() {
         body.ix-admin-integrated button.bg-slate-800, body.ix-admin-integrated button.bg-indigo-600, body.ix-admin-integrated button.bg-purple-600 { background:linear-gradient(135deg,var(--ixr-blue),var(--ixr-purple)) !important; color:#fff !important; box-shadow:0 8px 18px #2563eb28 !important; }
         body.ix-admin-integrated table { min-width:760px; border-collapse:collapse !important; }
         body.ix-admin-integrated thead, body.ix-admin-integrated .table-header { background:#f8fafc !important; backdrop-filter:none !important; }
+        body.ix-admin-integrated th { color:#475569 !important; text-transform:none !important; letter-spacing:0 !important; font-size:13px !important; }
         body.ix-admin-integrated th, body.ix-admin-integrated td { border-color:var(--ixr-line) !important; padding:12px 14px !important; }
         body.ix-admin-integrated tbody tr:hover { background:#eef2ff66 !important; }
         body.ix-admin-integrated .modal-enter { opacity:1; transform:scale(1); }
         body.ix-admin-integrated #nodeModalCard, body.ix-admin-integrated #clientModalCard, body.ix-admin-integrated #passwordModalCard, body.ix-admin-integrated #subscriptionModalCard { border:1px solid #edf1f7; border-radius:18px !important; box-shadow:0 24px 70px #11182730 !important; }
+        @media (max-width: 900px) { body.ix-admin-integrated .ix-hero-inner { flex-direction:column; align-items:flex-start; } body.ix-admin-integrated .ix-toolbar { justify-content:flex-start; } body.ix-admin-integrated .ix-action-label { display:none; } }
     </style>
 </head>
 <body class="text-slate-800 antialiased selection:bg-indigo-100 selection:text-indigo-900 pb-16 relative ix-admin-integrated" data-embedded="<?=isset($_GET['embedded']) ? '1' : '0'?>">
     
-    <!-- 顶部导航栏 -->
-    <nav class="glass-nav text-white px-6 py-4 sticky top-0 z-40 shadow-sm">
-        <div class="max-w-[1500px] mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
-            <div class="flex items-center gap-5">
-                <div class="text-2xl font-black tracking-tight bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent flex items-center">
-                    <i class="fa-solid fa-bolt mr-2 text-indigo-400"></i>IX Admin
-                </div>
-                <div class="hidden md:flex text-sm bg-slate-800/80 px-4 py-2 rounded-xl border border-slate-700 shadow-inner items-center transition hover:bg-slate-800">
-                    <i class="fa-solid fa-satellite-dish mr-2 text-indigo-400"></i> 
-                    <span class="text-slate-300 mr-2">监听端口:</span>
-                    <span id="inboundPort" onclick="editInboundPort()" class="click-to-edit font-mono tracking-wider font-bold text-base cursor-pointer text-white" title="点击修改主监听端口">---</span>
-                </div>
+    <nav class="glass-nav">
+        <div class="ix-hero-inner">
+            <div>
+                <div class="ix-kicker"><i class="fa-solid fa-diagram-project"></i>Legacy IX / V2Ray</div>
+                <h1 class="ix-hero-title"><i class="fa-solid fa-bolt"></i>IX Admin</h1>
+                <p class="ix-hero-subtitle">管理原 IX 中转节点、前端用户绑定和订阅导出。</p>
+                <button type="button" id="inboundPortBtn" onclick="editInboundPort()" class="ix-port-pill" title="点击修改主监听端口">
+                    <i class="fa-solid fa-satellite-dish"></i><span>监听端口</span><b id="inboundPort">---</b>
+                </button>
             </div>
-            <div class="flex gap-3"><a href="/" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl transition-all flex items-center" title="Back to IXR"><i class="fa-solid fa-house"></i></a>
-                <button id="testIpBtn" onclick="testNodeIps()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl transition-all flex items-center" title="穿透测速">
-                    <i class="fa-solid fa-network-wired"></i>
-                </button>
-                <button id="rebootBtn" onclick="restartService()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl transition-all flex items-center" title="保存并重启">
-                    <i class="fa-solid fa-rotate"></i>
-                </button>
-                <button onclick="copySubscriptionUrl()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl transition-all flex items-center" title="复制订阅链接">
-                    <i class="fa-solid fa-rss"></i>
-                </button>
-                    <a href="<?=h(getenv('IX_PANEL_GRAFANA_URL') ?: '#')?>" target="_blank" rel="noopener noreferrer" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl transition-all flex items-center" title="Grafana 监控">
-                        <i class="fa-solid fa-chart-line"></i>
-                    </a>
-                <a href="?action=logout" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl transition-all flex items-center" title="安全退出">
-                    <i class="fa-solid fa-power-off"></i>
-                </a>
+            <div class="ix-toolbar">
+                <a href="/" class="ix-action" title="返回 IXR"><i class="fa-solid fa-house"></i><span class="ix-action-label">返回 IXR</span></a>
+                <button id="testIpBtn" onclick="testNodeIps()" class="ix-action" title="穿透测速"><i class="fa-solid fa-network-wired"></i><span class="ix-action-label">穿透测速</span></button>
+                <button id="rebootBtn" onclick="restartService()" class="ix-action primary" title="保存并重启"><i class="fa-solid fa-rotate"></i><span class="ix-action-label">保存并重启</span></button>
+                <button onclick="copySubscriptionUrl()" class="ix-action" title="复制订阅"><i class="fa-solid fa-rss"></i><span class="ix-action-label">订阅</span></button>
+                <a href="<?=h(getenv('IX_PANEL_GRAFANA_URL') ?: '#')?>" target="_blank" rel="noopener noreferrer" class="ix-action" title="Grafana 监控"><i class="fa-solid fa-chart-line"></i><span class="ix-action-label">监控</span></a>
+                <a href="?action=logout" class="ix-action danger" title="安全退出"><i class="fa-solid fa-power-off"></i><span class="ix-action-label">退出</span></a>
             </div>
         </div>
     </nav>
 
     <div class="ix-admin-summary">
-        <div class="ix-admin-metric"><span>Nodes</span><b id="ixNodeCount">--</b></div>
-        <div class="ix-admin-metric"><span>Clients</span><b id="ixClientCount">--</b></div>
-        <div class="ix-admin-metric"><span>Bindings</span><b id="ixBoundCount">--</b></div>
-        <div class="ix-admin-metric"><span>Inbound Port</span><b id="ixInboundMetric">--</b></div>
+        <div class="ix-admin-metric"><i class="fa-solid fa-server"></i><div><span>落地节点</span><b id="ixNodeCount">--</b></div></div>
+        <div class="ix-admin-metric"><i class="fa-solid fa-users"></i><div><span>前端用户</span><b id="ixClientCount">--</b></div></div>
+        <div class="ix-admin-metric"><i class="fa-solid fa-link"></i><div><span>绑定关系</span><b id="ixBoundCount">--</b></div></div>
+        <div class="ix-admin-metric"><i class="fa-solid fa-satellite-dish"></i><div><span>监听端口</span><b id="ixInboundMetric">--</b></div></div>
     </div>
 
     <!-- 主容器 -->
@@ -971,6 +980,12 @@ function display_front_page() {
         const SUB_URL = <?= json_encode(SUB_PUBLIC_BASE_URL . 'ix-admin.php?sub=' . currentAdminSubscriptionToken(), JSON_UNESCAPED_SLASHES) ?>;
         const SURGE_SUB_URL = SUB_URL + '&format=surge';
 
+        function syncEmbeddedHeight() {
+            if (window.parent === window) return;
+            const height = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+            window.parent.postMessage({type: 'ix-admin-height', height}, window.location.origin);
+        }
+
         // 剪贴板复制，使用 stopPropagation 阻止冒泡触发弹窗
         function copyText(event, text) {
             event.stopPropagation();
@@ -1132,6 +1147,7 @@ function display_front_page() {
                     </td>
                 </tr>
             `).join('');
+            requestAnimationFrame(syncEmbeddedHeight);
         }
 
         // --- 模态框控制逻辑 ---
@@ -1272,6 +1288,8 @@ function display_front_page() {
             setTimeout(() => { t.classList.replace('translate-y-0', 'translate-y-12'); t.classList.replace('opacity-100', 'opacity-0'); }, 3500);
         }
 
+        window.addEventListener('load', syncEmbeddedHeight);
+        window.addEventListener('resize', syncEmbeddedHeight);
         loadData();
     </script>
 </body>
