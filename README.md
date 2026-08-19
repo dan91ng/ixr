@@ -11,6 +11,7 @@ This project is provided for lawful self-hosting, learning, and network manageme
 ## Layout
 
 - `src/ixr-manager/public/index.php` - Web UI
+- `src/ixr-manager/public/ix-admin.php` - integrated legacy IX admin page
 - `src/ixr-manager/bin/` - IXR apply, health check, usage stats and async helpers
 - `src/ixr-manager/data/*.example.json` - safe example configs
 - `src/ix-panel/public/` - sanitized legacy IX V2Ray panel
@@ -55,7 +56,9 @@ Then run:
 
 ## Legacy IX panel
 
-The legacy IX panel is kept under `src/ix-panel/public/` as a sanitized companion app for existing 233boy V2Ray deployments. Configure secrets and public domains with environment variables or replace the example values during deployment.
+The legacy IX admin page is integrated into IXR at `/ix-admin.php` and can also be opened from the IXR sidebar through `IX Admin`. It manages the existing 233boy V2Ray files on the same server while IXR continues to manage its independent Xray router separately.
+
+`src/ix-panel/public/` is kept as a sanitized standalone reference copy. Configure secrets and public domains with environment variables or replace the example values during deployment.
 
 Common environment variables:
 
@@ -64,3 +67,6 @@ Common environment variables:
 - `IX_PANEL_FRONT_PASSWORD`
 - `IX_PANEL_FRONT_ENTRY_HOST`
 - `IX_PANEL_PUBLIC_BASE_URL`
+- `IX_PANEL_GRAFANA_URL`
+
+When using the integrated `/ix-admin.php` page, login is handled by IXR. The legacy IX admin password variables are only needed for standalone legacy deployments.

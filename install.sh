@@ -6,6 +6,9 @@ IXR_EXPORT_ADDRESS="${IXR_EXPORT_ADDRESS:-proxy.example.com}"
 IXR_ADMIN_USER="${IXR_ADMIN_USER:-admin}"
 IXR_ADMIN_PASSWORD="${IXR_ADMIN_PASSWORD:-change-me}"
 IXR_DN42_DNS_SERVERS="${IXR_DN42_DNS_SERVERS:-}"
+IX_PANEL_FRONT_ENTRY_HOST="${IX_PANEL_FRONT_ENTRY_HOST:-public.example.com}"
+IX_PANEL_PUBLIC_BASE_URL="${IX_PANEL_PUBLIC_BASE_URL:-https://ix.example.com/}"
+IX_PANEL_GRAFANA_URL="${IX_PANEL_GRAFANA_URL:-#}"
 INSTALL_DEPS="${INSTALL_DEPS:-1}"
 INSTALL_XRAY="${INSTALL_XRAY:-1}"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,7 +19,7 @@ install_deps(){ [ "$INSTALL_DEPS" = "1" ] || return 0; if command -v apt-get >/d
 install_xray(){ if [ "$INSTALL_XRAY" = "1" ] && ! [ -x /usr/local/bin/xray ]; then bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install; fi; }
 find_php_sock(){ local svc; for svc in $(systemctl list-unit-files 'php*-fpm.service' --no-legend 2>/dev/null | awk '{print $1}'); do systemctl enable --now "$svc" >/dev/null 2>&1 || true; systemctl restart "$svc" >/dev/null 2>&1 || true; done; sleep 1; ls /run/php/php*-fpm.sock 2>/dev/null | sort -V | tail -1 || true; }
 init_data_file(){ local name="$1"; [ -f "/opt/ixr-manager/data/${name}.json" ] || cp -a "/opt/ixr-manager/data/${name}.example.json" "/opt/ixr-manager/data/${name}.json"; }
-patch_runtime_values(){ IXR_DOMAIN="$IXR_DOMAIN" IXR_EXPORT_ADDRESS="$IXR_EXPORT_ADDRESS" IXR_ADMIN_USER="$IXR_ADMIN_USER" IXR_ADMIN_PASSWORD="$IXR_ADMIN_PASSWORD" python3 - <<'PY'
+patch_runtime_values(){ IXR_DOMAIN="$IXR_DOMAIN" IXR_EXPORT_ADDRESS="$IXR_EXPORT_ADDRESS" IXR_ADMIN_USER="$IXR_ADMIN_USER" IXR_ADMIN_PASSWORD="$IXR_ADMIN_PASSWORD" IX_PANEL_FRONT_ENTRY_HOST="$IX_PANEL_FRONT_ENTRY_HOST" IX_PANEL_PUBLIC_BASE_URL="$IX_PANEL_PUBLIC_BASE_URL" IX_PANEL_GRAFANA_URL="$IX_PANEL_GRAFANA_URL" python3 - <<'PY'
 from pathlib import Path
 import json, os
 index = Path('/opt/ixr-manager/public/index.php')
@@ -25,6 +28,13 @@ text = text.replace("getenv('IXR_ADMIN_USER') ?: 'admin'", "getenv('IXR_ADMIN_US
 text = text.replace("getenv('IXR_ADMIN_PASSWORD') ?: 'change-me'", "getenv('IXR_ADMIN_PASSWORD') ?: " + repr(os.environ['IXR_ADMIN_PASSWORD']))
 text = text.replace('/?section=', f"https://{os.environ['IXR_DOMAIN']}/?section=")
 index.write_text(text, encoding='utf-8')
+ix_admin = Path('/opt/ixr-manager/public/ix-admin.php')
+if ix_admin.exists():
+    text = ix_admin.read_text(encoding='utf-8')
+    text = text.replace("getenv('IX_PANEL_FRONT_ENTRY_HOST') ?: 'public.example.com'", "getenv('IX_PANEL_FRONT_ENTRY_HOST') ?: " + repr(os.environ['IX_PANEL_FRONT_ENTRY_HOST']))
+    text = text.replace("getenv('IX_PANEL_PUBLIC_BASE_URL') ?: 'https://ix.example.com/'", "getenv('IX_PANEL_PUBLIC_BASE_URL') ?: " + repr(os.environ['IX_PANEL_PUBLIC_BASE_URL']))
+    text = text.replace("getenv('IX_PANEL_GRAFANA_URL') ?: '#'", "getenv('IX_PANEL_GRAFANA_URL') ?: " + repr(os.environ['IX_PANEL_GRAFANA_URL']))
+    ix_admin.write_text(text, encoding='utf-8')
 export_path = Path('/opt/ixr-manager/data/export.json')
 data = json.loads(export_path.read_text(encoding='utf-8'))
 data['default_address'] = os.environ['IXR_EXPORT_ADDRESS']
