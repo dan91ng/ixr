@@ -10,14 +10,61 @@ function h($value) {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
+function normalizeFrontEntryHost($value) {
+    $host = trim((string)$value);
+    if (strpos($host, '://') !== false) {
+        $parsedHost = parse_url($host, PHP_URL_HOST);
+        if ($parsedHost) $host = $parsedHost;
+    }
+    $host = preg_replace('/[\/?#].*$/', '', $host);
+    $host = trim($host, " \t\n\r\0\x0B[]");
+    if (substr_count($host, ':') === 1 && preg_match('/^(.+):\d+$/', $host, $matches)) {
+        $host = $matches[1];
+    }
+    return $host;
+}
+
+function loadFrontEntryHostSetting() {
+    $stored = file_exists(FRONT_ENTRY_HOST_FILE) ? trim(file_get_contents(FRONT_ENTRY_HOST_FILE)) : '';
+    $env = getenv('IX_PANEL_FRONT_ENTRY_HOST') ?: '';
+    return normalizeFrontEntryHost($stored ?: $env ?: 'public.example.com');
+}
+
+function saveFrontEntryHostSetting($value) {
+    $host = normalizeFrontEntryHost($value);
+    if ($host === '') throw new Exception('连接地址不能为空');
+    if (strlen($host) > 255) throw new Exception('连接地址太长');
+    if (!preg_match('/^[A-Za-z0-9._:-]+$/', $host)) throw new Exception('连接地址只能填写域名或 IP，不要带协议、路径或空格');
+    $dir = dirname(FRONT_ENTRY_HOST_FILE);
+    if (!is_dir($dir)) mkdir($dir, 0755, true);
+    file_put_contents(FRONT_ENTRY_HOST_FILE, $host);
+    @chmod(FRONT_ENTRY_HOST_FILE, 0600);
+    return $host;
+}
+
+function currentPublicBaseUrl() {
+    $host = $_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['HTTP_HOST'] ?? '';
+    $host = trim(explode(',', (string)$host)[0]);
+    $host = preg_replace('/[^A-Za-z0-9._:-]/', '', $host);
+    if ($host === '') return 'https://ix.example.com/';
+
+    $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '';
+    $proto = strtolower(trim(explode(',', (string)$proto)[0]));
+    if ($proto !== 'https' && $proto !== 'http') {
+        $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    }
+    return $proto . '://' . $host . '/';
+}
+
 // ================= 配置区 =================
 define('ADMIN_USER', getenv('IX_PANEL_ADMIN_USER') ?: 'admin');          
 define('ADMIN_PASS', getenv('IX_PANEL_ADMIN_PASSWORD') ?: 'change-me');    
 define('ADMIN_PASS_HASH_FILE', '/var/lib/' . 'v2' . 'ray-panel/admin_pass_hash');
 define('FRONT_PASS', getenv('IX_PANEL_FRONT_PASSWORD') ?: 'change-me');
 define('FRONT_PASS_HASH_FILE', '/var/lib/' . 'v2' . 'ray-panel/front_pass_hash');
-define('FRONT_ENTRY_HOST', getenv('IX_PANEL_FRONT_ENTRY_HOST') ?: 'public.example.com');
-define('SUB_PUBLIC_BASE_URL', getenv('IX_PANEL_PUBLIC_BASE_URL') ?: 'https://ix.example.com/');
+define('FRONT_ENTRY_HOST_FILE', '/var/lib/' . 'v2' . 'ray-panel/front_entry_host');
+define('FRONT_ENTRY_HOST', loadFrontEntryHostSetting());
+define('SUB_PUBLIC_BASE_URL', rtrim(getenv('IX_PANEL_PUBLIC_BASE_URL') ?: currentPublicBaseUrl(), '/') . '/');
 define('SUB_SECRET_FILE', '/var/lib/' . 'v2' . 'ray-panel/sub_secret');
 define('NODE_LATENCY_CACHE', '/tmp/' . 'v2' . 'ray_node_latency.json');
 define('ADMIN_SUB_SECRET_FILE', '/var/lib/' . 'v2' . 'ray-panel/admin_sub_secret');
@@ -270,7 +317,7 @@ function buildPanelData() {
     }
     unset($node);
 
-    return ['success' => true, 'clients' => $clients, 'nodes' => $nodes, 'bindings' => $bindings, 'inbound_port' => $inboundPort];
+    return ['success' => true, 'clients' => $clients, 'nodes' => $nodes, 'bindings' => $bindings, 'inbound_port' => $inboundPort, 'front_entry_host' => FRONT_ENTRY_HOST];
 }
 
 function syncTestPorts($mainData) {
@@ -312,6 +359,12 @@ if (isset($_GET['api'])) {
             $inboundData['inbounds'][0]['port'] = $newPort;
             writeJson(INBOUND_CONFIG, $inboundData);
             echo json_encode(['success' => true, 'message' => "主监听端口修改成功"]); exit;
+        }
+
+        if ($action === 'edit_front_entry_host') {
+            $host = saveFrontEntryHostSetting($input['front_entry_host'] ?? '');
+            echo json_encode(['success' => true, 'message' => "连接地址修改成功", 'front_entry_host' => $host]);
+            exit;
         }
 
         // 聚合节点修改接口
@@ -746,7 +799,8 @@ function display_front_page() {
         body.ix-admin-integrated[data-embedded="1"] .ix-hero-title i { color:var(--ixr-blue); }
         body.ix-admin-integrated .ix-hero-subtitle { margin:0; color:#e0e7ff; font-size:14px; }
         body.ix-admin-integrated[data-embedded="1"] .ix-hero-subtitle { color:var(--ixr-muted); }
-        body.ix-admin-integrated .ix-port-pill { margin-top:12px; display:inline-flex; align-items:center; gap:9px; border:1px solid rgba(255,255,255,.22); background:rgba(15,23,42,.24); color:#fff; border-radius:999px; padding:8px 12px; font-size:13px; font-weight:900; }
+        body.ix-admin-integrated .ix-port-row { margin-top:12px; display:flex; flex-wrap:wrap; gap:8px; }
+        body.ix-admin-integrated .ix-port-pill { display:inline-flex; align-items:center; gap:9px; border:1px solid rgba(255,255,255,.22); background:rgba(15,23,42,.24); color:#fff; border-radius:999px; padding:8px 12px; font-size:13px; font-weight:900; }
         body.ix-admin-integrated[data-embedded="1"] .ix-port-pill { border-color:#dbe3ef; background:#f8fafc; color:#334155; }
         body.ix-admin-integrated .ix-port-pill b { font-family:Consolas,monospace; color:inherit; }
         body.ix-admin-integrated .ix-toolbar { display:flex; gap:9px; flex-wrap:wrap; justify-content:flex-end; }
@@ -759,6 +813,7 @@ function display_front_page() {
         body.ix-admin-integrated .ix-admin-metric i { width:38px; height:38px; border-radius:13px; display:grid; place-items:center; color:#fff; background:linear-gradient(135deg,var(--ixr-blue),var(--ixr-purple)); box-shadow:0 8px 18px #2563eb25; }
         body.ix-admin-integrated .ix-admin-metric span { display:block; color:var(--ixr-muted); font-size:12px; font-weight:800; }
         body.ix-admin-integrated .ix-admin-metric b { display:block; margin-top:4px; color:var(--ixr-text); font-size:24px; line-height:1; }
+        body.ix-admin-integrated #ixFrontHostMetric { font-size:17px; line-height:1.25; word-break:break-all; }
         body.ix-admin-integrated .ix-admin-layout { max-width:none !important; margin:0 !important; padding:0 !important; gap:16px !important; align-items:start; }
         body.ix-admin-integrated .ix-card, body.ix-admin-integrated .ix-card-like { background:var(--ixr-card) !important; border:1px solid #edf1f7 !important; border-radius:18px !important; box-shadow:var(--ixr-shadow) !important; overflow:hidden; }
         body.ix-admin-integrated .ix-card > div:first-child, body.ix-admin-integrated .ix-card-like > div:first-child { background:#fbfdff !important; border-color:var(--ixr-line) !important; }
@@ -785,9 +840,14 @@ function display_front_page() {
                 <div class="ix-kicker"><i class="fa-solid fa-diagram-project"></i>Legacy IX / V2Ray</div>
                 <h1 class="ix-hero-title"><i class="fa-solid fa-bolt"></i>IX Admin</h1>
                 <p class="ix-hero-subtitle">管理原 IX 中转节点、前端用户绑定和订阅导出。</p>
-                <button type="button" id="inboundPortBtn" onclick="editInboundPort()" class="ix-port-pill" title="点击修改主监听端口">
-                    <i class="fa-solid fa-satellite-dish"></i><span>监听端口</span><b id="inboundPort">---</b>
-                </button>
+                <div class="ix-port-row">
+                    <button type="button" id="inboundPortBtn" onclick="editInboundPort()" class="ix-port-pill" title="点击修改主监听端口">
+                        <i class="fa-solid fa-satellite-dish"></i><span>监听端口</span><b id="inboundPort">---</b>
+                    </button>
+                    <button type="button" id="frontEntryHostBtn" onclick="editFrontEntryHost()" class="ix-port-pill" title="点击修改导出 VMess 的连接地址">
+                        <i class="fa-solid fa-globe"></i><span>连接地址</span><b id="frontEntryHost">---</b>
+                    </button>
+                </div>
             </div>
             <div class="ix-toolbar">
                 <a href="/" class="ix-action" title="返回 IXR"><i class="fa-solid fa-house"></i><span class="ix-action-label">返回 IXR</span></a>
@@ -805,6 +865,7 @@ function display_front_page() {
         <div class="ix-admin-metric"><i class="fa-solid fa-users"></i><div><span>前端用户</span><b id="ixClientCount">--</b></div></div>
         <div class="ix-admin-metric"><i class="fa-solid fa-link"></i><div><span>绑定关系</span><b id="ixBoundCount">--</b></div></div>
         <div class="ix-admin-metric"><i class="fa-solid fa-satellite-dish"></i><div><span>监听端口</span><b id="ixInboundMetric">--</b></div></div>
+        <div class="ix-admin-metric"><i class="fa-solid fa-globe"></i><div><span>连接地址</span><b id="ixFrontHostMetric">--</b></div></div>
     </div>
 
     <!-- 主容器 -->
@@ -816,6 +877,15 @@ function display_front_page() {
             <div class="ix-card bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
                 <div class="flex items-center justify-between mb-5">
                     <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-link mr-2 text-indigo-500 bg-indigo-50 p-2 rounded-lg"></i>快速导入落地节点</h3>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 mb-5">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">导出连接地址</label>
+                        <input type="text" id="frontEntryHostInput" placeholder="填写前置转发域名或 IP" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm shadow-inner">
+                    </div>
+                    <button onclick="saveFrontEntryHostFromInput()" class="self-end bg-indigo-600 text-white px-6 py-3 rounded-xl hover:bg-indigo-700 transition shadow-md font-bold whitespace-nowrap flex items-center justify-center">
+                        <i class="fa-solid fa-floppy-disk mr-2"></i>保存地址
+                    </button>
                 </div>
                 <div class="flex gap-3 relative">
                     <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><i class="fa-solid fa-paste text-slate-400"></i></div>
@@ -976,7 +1046,7 @@ function display_front_page() {
         let clientsCache = [];
         let nodesCache = [];
         let currentInboundPort = '';
-        const FRONT_ENTRY_HOST = <?= json_encode(FRONT_ENTRY_HOST) ?>;
+        let frontEntryHost = <?= json_encode(FRONT_ENTRY_HOST) ?>;
         const SUB_URL = <?= json_encode(SUB_PUBLIC_BASE_URL . 'ix-admin.php?sub=' . currentAdminSubscriptionToken(), JSON_UNESCAPED_SLASHES) ?>;
         const SURGE_SUB_URL = SUB_URL + '&format=surge';
 
@@ -1003,7 +1073,7 @@ function display_front_page() {
             const config = {
                 v: "2",
                 ps: `HKIX|${node.tag}-${node.config_ip}`,
-                add: FRONT_ENTRY_HOST,
+                add: frontEntryHost,
                 port: String(currentInboundPort || "10183"),
                 id: node.frontend_uuid,
                 aid: "0",
@@ -1066,7 +1136,11 @@ function display_front_page() {
             clientsCache = res.clients;
             nodesCache = res.nodes;
             currentInboundPort = res.inbound_port;
+            frontEntryHost = res.front_entry_host || frontEntryHost;
             document.getElementById('inboundPort').textContent = res.inbound_port;
+            document.getElementById('frontEntryHost').textContent = frontEntryHost;
+            const frontHostInput = document.getElementById('frontEntryHostInput');
+            if (frontHostInput) frontHostInput.value = frontEntryHost;
 
             const metric = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
             const boundCount = Object.values(res.bindings || {}).filter(Boolean).length;
@@ -1074,6 +1148,7 @@ function display_front_page() {
             metric('ixClientCount', (res.clients || []).length);
             metric('ixBoundCount', boundCount);
             metric('ixInboundMetric', res.inbound_port || '--');
+            metric('ixFrontHostMetric', frontEntryHost || '--');
             
             const emailCounts = {};
             Object.values(res.bindings).forEach(email => { if (email) emailCounts[email] = (emailCounts[email] || 0) + 1; });
@@ -1222,6 +1297,34 @@ function display_front_page() {
             if (input === null || input.trim() === '' || input.trim() == currentInboundPort) return;
             const res = await fetch('?api=edit_inbound_port', {method: 'POST', body: JSON.stringify({new_port: input.trim()})}).then(r => r.json());
             if(res.success) { showToast(`${res.message}，请重启生效`); loadData(); } else showToast(res.error, "error");
+        }
+
+        async function editFrontEntryHost() {
+            const inputBox = document.getElementById('frontEntryHostInput');
+            if (inputBox) {
+                inputBox.focus();
+                inputBox.select();
+                showToast('已定位到连接地址设置，修改后点击保存地址');
+                return;
+            }
+            const input = prompt(`修改导出 VMess 的连接地址\n\n只填写域名或 IP，不要带 https://、端口或路径。\n\n例如：your-forward-domain.com`, frontEntryHost);
+            if (input === null || input.trim() === '' || input.trim() === frontEntryHost) return;
+            await saveFrontEntryHost(input.trim());
+        }
+
+        async function saveFrontEntryHostFromInput() {
+            const input = document.getElementById('frontEntryHostInput');
+            if (!input) return;
+            const value = input.value.trim();
+            if (!value) return showToast('请先填写导出连接地址', 'error');
+            if (value === frontEntryHost) return showToast('连接地址没有变化');
+            await saveFrontEntryHost(value);
+        }
+
+        async function saveFrontEntryHost(value) {
+            const res = await fetch('?api=edit_front_entry_host', {method: 'POST', body: JSON.stringify({front_entry_host: value})}).then(r => r.json());
+            if(res.success) { frontEntryHost = res.front_entry_host; showToast(`${res.message}，复制配置会立即使用新地址`); loadData(); } else showToast(res.error, "error");
+            return res;
         }
 
         async function updateBinding(tag, email) {
