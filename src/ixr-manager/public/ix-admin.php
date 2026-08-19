@@ -980,12 +980,6 @@ function display_front_page() {
         const SUB_URL = <?= json_encode(SUB_PUBLIC_BASE_URL . 'ix-admin.php?sub=' . currentAdminSubscriptionToken(), JSON_UNESCAPED_SLASHES) ?>;
         const SURGE_SUB_URL = SUB_URL + '&format=surge';
 
-        function syncEmbeddedHeight() {
-            if (window.parent === window) return;
-            const height = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-            window.parent.postMessage({type: 'ix-admin-height', height}, window.location.origin);
-        }
-
         // 剪贴板复制，使用 stopPropagation 阻止冒泡触发弹窗
         function copyText(event, text) {
             event.stopPropagation();
@@ -1147,7 +1141,6 @@ function display_front_page() {
                     </td>
                 </tr>
             `).join('');
-            requestAnimationFrame(syncEmbeddedHeight);
         }
 
         // --- 模态框控制逻辑 ---
@@ -1288,8 +1281,6 @@ function display_front_page() {
             setTimeout(() => { t.classList.replace('translate-y-0', 'translate-y-12'); t.classList.replace('opacity-100', 'opacity-0'); }, 3500);
         }
 
-        window.addEventListener('load', syncEmbeddedHeight);
-        window.addEventListener('resize', syncEmbeddedHeight);
         loadData();
     </script>
 </body>
