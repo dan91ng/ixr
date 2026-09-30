@@ -26,20 +26,8 @@ function normalizeFrontEntryHost($value) {
 
 function loadFrontEntryHostSetting() {
     $stored = file_exists(FRONT_ENTRY_HOST_FILE) ? trim(file_get_contents(FRONT_ENTRY_HOST_FILE)) : '';
-    $env = getenv('IX_PANEL_FRONT_ENTRY_HOST') ?: '';
+    $env = getenv('IX_PANEL_FRONT_ENTRY_HOST') ?: 'public.example.com';
     return normalizeFrontEntryHost($stored ?: $env ?: 'public.example.com');
-}
-
-function saveFrontEntryHostSetting($value) {
-    $host = normalizeFrontEntryHost($value);
-    if ($host === '') throw new Exception('连接地址不能为空');
-    if (strlen($host) > 255) throw new Exception('连接地址太长');
-    if (!preg_match('/^[A-Za-z0-9._:-]+$/', $host)) throw new Exception('连接地址只能填写域名或 IP，不要带协议、路径或空格');
-    $dir = dirname(FRONT_ENTRY_HOST_FILE);
-    if (!is_dir($dir)) mkdir($dir, 0755, true);
-    file_put_contents(FRONT_ENTRY_HOST_FILE, $host);
-    @chmod(FRONT_ENTRY_HOST_FILE, 0600);
-    return $host;
 }
 
 function currentPublicBaseUrl() {
@@ -57,21 +45,12 @@ function currentPublicBaseUrl() {
 }
 
 // ================= 配置区 =================
-define('ADMIN_USER', getenv('IX_PANEL_ADMIN_USER') ?: 'admin');          
-define('ADMIN_PASS', getenv('IX_PANEL_ADMIN_PASSWORD') ?: 'change-me');    
-define('ADMIN_PASS_HASH_FILE', '/var/lib/' . 'v2' . 'ray-panel/admin_pass_hash');
-define('FRONT_PASS', getenv('IX_PANEL_FRONT_PASSWORD') ?: 'change-me');
-define('FRONT_PASS_HASH_FILE', '/var/lib/' . 'v2' . 'ray-panel/front_pass_hash');
 define('FRONT_ENTRY_HOST_FILE', '/var/lib/' . 'v2' . 'ray-panel/front_entry_host');
 define('FRONT_ENTRY_HOST', loadFrontEntryHostSetting());
 define('SUB_PUBLIC_BASE_URL', rtrim(getenv('IX_PANEL_PUBLIC_BASE_URL') ?: currentPublicBaseUrl(), '/') . '/');
-define('SUB_SECRET_FILE', '/var/lib/' . 'v2' . 'ray-panel/sub_secret');
-define('NODE_LATENCY_CACHE', '/tmp/' . 'v2' . 'ray_node_latency.json');
 define('ADMIN_SUB_SECRET_FILE', '/var/lib/' . 'v2' . 'ray-panel/admin_sub_secret');
-define('NODE_VISIBILITY_FILE', '/var/lib/' . 'v2' . 'ray-panel/node_visibility.json');
-define('MAIN_CONFIG', '/etc/' . 'v2' . 'ray/config.json');
-define('INBOUND_CONFIG', '/etc/' . 'v2' . 'ray/conf/VMess-TCP-10183.json');
-define('NODE_IP_CACHE', '/tmp/' . 'v2' . 'ray_node_ips.json');
+require_once __DIR__ . '/lib/user_store.php';
+require_once __DIR__ . '/lib/ix_admin_xray.php';
 // ==========================================
 
 // --- IXR integrated authentication ---
@@ -79,103 +58,32 @@ if (isset($_GET['sub'])) {
     outputAdminSubscription();
 }
 if (isset($_GET['action']) && $_GET['action'] === 'logout') {
-    session_destroy(); header("Location: /"); exit;
+    session_destroy(); header("Location: /admin.php"); exit;
 }
-if (empty($_SESSION['ixr_login'])) {
+$adminFallbackPassword = (string)(getenv('IXR_ADMIN_PASSWORD') ?: 'change-me');
+$adminSessionValid = false;
+try {
+    $adminSessionValid = ixr_admin_session_valid($adminFallbackPassword);
+} catch (Throwable $error) {
+    $adminSessionValid = false;
+}
+if (!$adminSessionValid) {
+    $_SESSION = [];
+    session_destroy();
     if (isset($_GET['api'])) {
         header('Content-Type: application/json');
         http_response_code(401);
         echo json_encode(['success' => false, 'error' => 'Not logged in']);
         exit;
     }
-    header('Location: /');
+    header('Location: /admin.php');
     exit;
 }
 $_SESSION['logged_in'] = true;
-
-function readJson($path) {
-    if (!file_exists($path)) throw new Exception("文件不存在: $path");
-    return json_decode(file_get_contents($path), true);
-}
-
-function writeJson($path, $data) {
-    if (isset($data['dns']) && empty($data['dns'])) $data['dns'] = new stdClass();
-    if (isset($data['stats']) && empty($data['stats'])) $data['stats'] = new stdClass();
-    if (isset($data['policy']['levels'])) $data['policy']['levels'] = (object)$data['policy']['levels'];
-    file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-}
-
-function generateUuid() {
-    return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex(random_bytes(16)), 4));
-}
-
-function getPasswordHash($path, $defaultPassword) {
-    if (file_exists($path)) return trim(file_get_contents($path));
-    return password_hash($defaultPassword, PASSWORD_DEFAULT);
-}
-
-function verifyStoredPassword($path, $defaultPassword, $password) {
-    return password_verify($password, getPasswordHash($path, $defaultPassword));
-}
-
-function savePasswordHash($path, $password) {
-    if (strlen($password) < 6) throw new Exception("密码至少需要 6 位");
-    file_put_contents($path, password_hash($password, PASSWORD_DEFAULT));
-    @chmod($path, 0600);
-}
-
-function getNodeVisibility() {
-    if (!file_exists(NODE_VISIBILITY_FILE)) return [];
-    $data = json_decode(file_get_contents(NODE_VISIBILITY_FILE), true);
-    return is_array($data) ? $data : [];
-}
-
-function isNodeVisibleOnFront($tag, $visibility) {
-    return !array_key_exists($tag, $visibility) || $visibility[$tag] !== false;
-}
-
-function saveNodeVisibility($tag, $showOnFront) {
-    $visibility = getNodeVisibility();
-    $visibility[$tag] = (bool)$showOnFront;
-    file_put_contents(NODE_VISIBILITY_FILE, json_encode($visibility, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    @chmod(NODE_VISIBILITY_FILE, 0600);
-}
-
-function getNodeLatencies($nodes) {
-    $cache = ['time' => 0, 'items' => []];
-    if (file_exists(NODE_LATENCY_CACHE)) {
-        $decoded = json_decode(file_get_contents(NODE_LATENCY_CACHE), true);
-        if (is_array($decoded)) $cache = array_merge($cache, $decoded);
-    }
-    if (time() - ($cache['time'] ?? 0) < 300 && !empty($cache['items'])) return $cache['items'];
-
-    $items = [];
-    foreach ($nodes as $node) {
-        $tag = $node['tag'] ?? '';
-        $address = $node['settings']['vnext'][0]['address'] ?? '';
-        if (!$tag || !$address) continue;
-        $target = escapeshellarg($address);
-        $output = shell_exec("ping -c 1 -W 1 $target 2>/dev/null");
-        if (is_string($output) && preg_match('/time=([0-9.]+)\\s*ms/', $output, $m)) {
-            $items[$tag] = round((float)$m[1]) . 'ms';
-        } else {
-            $items[$tag] = '超时';
-        }
-    }
-    file_put_contents(NODE_LATENCY_CACHE, json_encode(['time' => time(), 'items' => $items], JSON_UNESCAPED_UNICODE));
-    return $items;
-}
-
-function getSubscriptionSecret() {
-    if (file_exists(SUB_SECRET_FILE)) return trim(file_get_contents(SUB_SECRET_FILE));
-    $secret = bin2hex(random_bytes(32));
-    file_put_contents(SUB_SECRET_FILE, $secret);
-    @chmod(SUB_SECRET_FILE, 0600);
-    return $secret;
-}
-
-function currentSubscriptionToken() {
-    return substr(hash_hmac('sha256', date('Ym'), getSubscriptionSecret()), 0, 32);
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+if (isset($_GET['api'])) {
+    ixr_admin_xray_handle_api();
 }
 
 function getAdminSubscriptionSecret() {
@@ -264,515 +172,17 @@ function outputAdminSubscription() {
     exit;
 }
 
-function buildPanelData() {
-    $mainData = readJson(MAIN_CONFIG);
-    $inboundData = readJson(INBOUND_CONFIG);
-    
-    $clients = $inboundData['inbounds'][0]['settings']['clients'] ?? [];
-    $inboundPort = $inboundData['inbounds'][0]['port'] ?? '未知';
-    
-    $nodes = array_values(array_filter($mainData['outbounds'], fn($o) => !in_array($o['tag'], ['direct', 'block', 'api'])));
-    $visibility = getNodeVisibility();
-    $realIps = file_exists(NODE_IP_CACHE) ? json_decode(file_get_contents(NODE_IP_CACHE), true) : [];
-    $latencies = getNodeLatencies($nodes);
-
-    $bindings = [];
-    foreach ($mainData['routing']['rules'] as $rule) {
-        if (isset($rule['outboundTag']) && isset($rule['user'][0]) && strpos($rule['inboundTag'][0] ?? '', 'test_proxy_') !== 0) {
-            $bindings[$rule['outboundTag']] = $rule['user'][0];
-        }
-    }
-
-    $clientsByEmail = [];
-    foreach ($clients as $client) {
-        if (!empty($client['email'])) $clientsByEmail[$client['email']] = $client['id'] ?? '';
-    }
-
-    foreach ($nodes as &$node) {
-        $address = $node['settings']['vnext'][0]['address'] ?? '';
-        $exitIp = $realIps[$node['tag']] ?? '待探测 (点击右上角)';
-        $landingIp = '';
-        if ($address) {
-            $landingIp = filter_var($address, FILTER_VALIDATE_IP) ? $address : gethostbyname($address);
-            if (!filter_var($landingIp, FILTER_VALIDATE_IP)) $landingIp = '';
-        }
-        $probeResult = '待探测';
-        if (filter_var($exitIp, FILTER_VALIDATE_IP) && $landingIp) {
-            $probeResult = $exitIp === $landingIp ? '一致' : '不一致';
-        } elseif (!$landingIp) {
-            $probeResult = '解析失败';
-        }
-
-        $frontendEmail = $bindings[$node['tag']] ?? '';
-        $node['config_ip'] = $address;
-        $node['landing_ip'] = $landingIp;
-        $node['config_port'] = $node['settings']['vnext'][0]['port'] ?? '';
-        $node['latency'] = $latencies[$node['tag']] ?? '待探测';
-        $node['exit_ip'] = $exitIp;
-        $node['probe_result'] = $probeResult;
-        $node['uuid'] = $node['settings']['vnext'][0]['users'][0]['id'] ?? '';
-        $node['frontend_email'] = $frontendEmail;
-        $node['frontend_uuid'] = $clientsByEmail[$frontendEmail] ?? '';
-        $node['show_on_front'] = isNodeVisibleOnFront($node['tag'] ?? '', $visibility);
-    }
-    unset($node);
-
-    return ['success' => true, 'clients' => $clients, 'nodes' => $nodes, 'bindings' => $bindings, 'inbound_port' => $inboundPort, 'front_entry_host' => FRONT_ENTRY_HOST];
+function buildPanelData(): array
+{
+    return ixr_admin_xray_panel_data();
 }
 
-function syncTestPorts($mainData) {
-    $mainData['inbounds'] = array_values(array_filter($mainData['inbounds'], fn($in) => strpos($in['tag'] ?? '', 'test_proxy_') !== 0));
-    $mainData['routing']['rules'] = array_values(array_filter($mainData['routing']['rules'], fn($r) => !(isset($r['inboundTag'][0]) && strpos($r['inboundTag'][0], 'test_proxy_') === 0)));
 
-    $nodes = array_filter($mainData['outbounds'], fn($o) => !in_array($o['tag'], ['direct', 'block', 'api']));
-    $portCounter = 30000;
-    foreach ($nodes as $node) {
-        $tag = $node['tag'];
-        $testTag = "test_proxy_" . $tag;
-        $mainData['inbounds'][] = ["tag" => $testTag, "port" => $portCounter, "listen" => "127.0.0.1", "protocol" => "socks", "settings" => ["auth" => "noauth", "udp" => false]];
-        array_unshift($mainData['routing']['rules'], ["type" => "field", "inboundTag" => [$testTag], "outboundTag" => $tag]);
-        $portCounter++;
-    }
-    return $mainData;
-}
-
-// --- 后端 API 逻辑 ---
-if (isset($_GET['api'])) {
-    header('Content-Type: application/json');
-    try {
-        $action = $_GET['api'];
-        $input = json_decode(file_get_contents('php://input'), true);
-
-        if ($action === 'get_data') {
-            echo json_encode(buildPanelData());
-            exit;
-        }
-
-        if ($action === 'change_password') {
-            throw new Exception('IX Admin uses the IXR unified login session. Change the IXR password from deployment configuration.');
-        }
-
-        if ($action === 'edit_inbound_port') {
-            $newPort = (int)trim($input['new_port'] ?? '');
-            if (!$newPort || $newPort <= 0 || $newPort > 65535) throw new Exception("端口必须在 1-65535 之间");
-            $inboundData = readJson(INBOUND_CONFIG);
-            $inboundData['inbounds'][0]['port'] = $newPort;
-            writeJson(INBOUND_CONFIG, $inboundData);
-            echo json_encode(['success' => true, 'message' => "主监听端口修改成功"]); exit;
-        }
-
-        if ($action === 'edit_front_entry_host') {
-            $host = saveFrontEntryHostSetting($input['front_entry_host'] ?? '');
-            echo json_encode(['success' => true, 'message' => "连接地址修改成功", 'front_entry_host' => $host]);
-            exit;
-        }
-
-        // 聚合节点修改接口
-        if ($action === 'edit_node') {
-            $oldTag = $input['old_tag'] ?? '';
-            $newTag = trim($input['new_tag'] ?? '');
-            $newAddress = trim($input['new_address'] ?? '');
-            $newPort = (int)trim($input['new_port'] ?? '');
-            $newUuid = trim($input['new_uuid'] ?? '');
-            $showOnFront = !empty($input['show_on_front']);
-
-            if (!$oldTag) throw new Exception("系统错误：原标签丢失");
-            if (!$newTag) $newTag = $oldTag;
-            if (!preg_match('/^[a-zA-Z0-9_-]+$/', $newTag)) throw new Exception("标签只能包含字母、数字、下划线和中划线");
-            if (!$newAddress || preg_match('/\s/', $newAddress)) throw new Exception("落地地址不能为空，且不能包含空格");
-            if ($newPort <= 0 || $newPort > 65535) throw new Exception("无效的端口号");
-            if (!$newUuid) throw new Exception("落地节点 UUID 不能为空，请填写对端 vmess 配置里的 id");
-            if (!preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $newUuid)) throw new Exception("落地节点 UUID 格式不正确");
-
-            $mainData = readJson(MAIN_CONFIG);
-            $inboundData = readJson(INBOUND_CONFIG);
-
-            if ($oldTag !== $newTag) {
-                foreach ($mainData['outbounds'] as $out) { if ($out['tag'] === $newTag) throw new Exception("新标签名称已存在"); }
-            }
-
-            $oldEmail = ""; $newEmail = strtolower($newTag) . '@' . 'v2' . 'ray.com'; $found = false;
-
-            foreach ($mainData['outbounds'] as &$out) {
-                if ($out['tag'] === $oldTag) {
-                    $out['tag'] = $newTag;
-                    if (isset($out['settings']['vnext'][0]['address'])) $out['settings']['vnext'][0]['address'] = $newAddress;
-                    if (isset($out['settings']['vnext'][0]['port'])) $out['settings']['vnext'][0]['port'] = $newPort;
-                    if (isset($out['settings']['vnext'][0]['users'][0]['id'])) $out['settings']['vnext'][0]['users'][0]['id'] = $newUuid;
-                    $found = true; break;
-                }
-            }
-            unset($out);
-            if (!$found) throw new Exception("未找到对应的节点");
-
-            foreach ($mainData['routing']['rules'] as &$rule) {
-                if (isset($rule['outboundTag']) && $rule['outboundTag'] === $oldTag) {
-                    $rule['outboundTag'] = $newTag;
-                    if (!empty($rule['user'][0])) $oldEmail = $rule['user'][0];
-                }
-            }
-            unset($rule);
-
-            if ($oldEmail && $oldTag !== $newTag) {
-                foreach ($mainData['routing']['rules'] as &$rule) {
-                    if (isset($rule['user']) && in_array($oldEmail, $rule['user'])) {
-                        $rule['user'] = array_map(fn($e) => $e === $oldEmail ? $newEmail : $e, $rule['user']);
-                    }
-                }
-                unset($rule);
-                foreach ($inboundData['inbounds'][0]['settings']['clients'] as &$client) {
-                    if ($client['email'] === $oldEmail) $client['email'] = $newEmail;
-                }
-                unset($client);
-            }
-
-            $visibility = getNodeVisibility();
-            if ($oldTag !== $newTag && array_key_exists($oldTag, $visibility)) {
-                unset($visibility[$oldTag]);
-                file_put_contents(NODE_VISIBILITY_FILE, json_encode($visibility, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                @chmod(NODE_VISIBILITY_FILE, 0600);
-            }
-            saveNodeVisibility($newTag, $showOnFront);
-
-            writeJson(MAIN_CONFIG, $mainData); writeJson(INBOUND_CONFIG, $inboundData);
-            echo json_encode(['success' => true, 'message' => "节点信息更新成功"]); exit;
-        }
-
-        if ($action === 'update_binding') {
-            $tag = $input['tag']; $email = $input['email'] ?? ''; 
-            $mainData = readJson(MAIN_CONFIG);
-            foreach ($mainData['routing']['rules'] as $key => $rule) {
-                if (isset($rule['outboundTag']) && $rule['outboundTag'] === $tag && isset($rule['user'])) unset($mainData['routing']['rules'][$key]);
-            }
-            $mainData['routing']['rules'] = array_values($mainData['routing']['rules']);
-            if (!empty($email)) array_unshift($mainData['routing']['rules'], ["type" => "field", "inboundTag" => ["mixed"], "outboundTag" => $tag, "user" => [$email]]);
-            writeJson(MAIN_CONFIG, $mainData);
-            echo json_encode(['success' => true, 'message' => "绑定更新成功"]); exit;
-        }
-
-        if ($action === 'add_node_from_uri') {
-            $uri = trim($input['uri'] ?? '');
-            if (strpos($uri, 'vmess://') !== 0) throw new Exception("无效的 vmess 链接");
-            $nodeInfo = json_decode(base64_decode(substr($uri, 8)), true);
-            if (!$nodeInfo) throw new Exception("链接解析失败");
-            $tag = !empty($nodeInfo['ps']) ? preg_replace('/[^a-zA-Z0-9_-]/', '', $nodeInfo['ps']) : 'node_' . time();
-            $newUuid = generateUuid(); $email = strtolower($tag) . '@' . 'v2' . 'ray.com';
-            $mainData = readJson(MAIN_CONFIG); $inboundData = readJson(INBOUND_CONFIG);
-            $mainData['outbounds'][] = ["tag" => $tag, "protocol" => "vmess", "settings" => ["vnext" => [["address" => $nodeInfo['add'], "port" => (int)$nodeInfo['port'], "users" => [["id" => $nodeInfo['id'], "alterId" => 0, "security" => "auto"]]]]], "streamSettings" => ["network" => $nodeInfo['net'] ?? "tcp"], "mux" => ["enabled" => false]];
-            array_unshift($mainData['routing']['rules'], ["type" => "field", "inboundTag" => ["mixed"], "outboundTag" => $tag, "user" => [$email]]);
-            $inboundData['inbounds'][0]['settings']['clients'][] = ["id" => $newUuid, "level" => 0, "email" => $email];
-            writeJson(MAIN_CONFIG, $mainData); writeJson(INBOUND_CONFIG, $inboundData);
-            echo json_encode(['success' => true, 'message' => "节点添加成功"]); exit;
-        }
-
-        if ($action === 'edit_client_uuid') {
-            $email = $input['email'] ?? ''; $newUuid = trim($input['new_uuid'] ?? '');
-            if (!$email) throw new Exception("邮箱标识不能为空");
-            if (empty($newUuid)) $newUuid = generateUuid();
-            $inboundData = readJson(INBOUND_CONFIG); $found = false;
-            foreach ($inboundData['inbounds'][0]['settings']['clients'] as &$client) {
-                if ($client['email'] === $email) { $client['id'] = $newUuid; $found = true; break; }
-            }
-            if (!$found) throw new Exception("未找到对应的前端用户");
-            writeJson(INBOUND_CONFIG, $inboundData);
-            echo json_encode(['success' => true, 'message' => "前端用户 UUID 已更新"]); exit;
-        }
-
-        if ($action === 'delete_node') {
-            $tag = $input['tag']; $mainData = readJson(MAIN_CONFIG); $inboundData = readJson(INBOUND_CONFIG);
-            $emailToRemove = "";
-            $mainData['outbounds'] = array_values(array_filter($mainData['outbounds'], fn($o) => $o['tag'] !== $tag));
-            foreach ($mainData['routing']['rules'] as $key => $rule) {
-                if (isset($rule['outboundTag']) && $rule['outboundTag'] === $tag && isset($rule['user'])) {
-                    $emailToRemove = $rule['user'][0] ?? ""; unset($mainData['routing']['rules'][$key]);
-                }
-            }
-            $mainData['routing']['rules'] = array_values($mainData['routing']['rules']);
-            $isEmailUsedElsewhere = false;
-            if (!empty($emailToRemove)) {
-                foreach ($mainData['routing']['rules'] as $rule) { if (isset($rule['user']) && in_array($emailToRemove, $rule['user'])) { $isEmailUsedElsewhere = true; break; } }
-            }
-            if (!empty($emailToRemove) && !$isEmailUsedElsewhere) {
-                foreach ($inboundData['inbounds'][0]['settings']['clients'] as $key => $client) { if ($client['email'] === $emailToRemove) unset($inboundData['inbounds'][0]['settings']['clients'][$key]); }
-                $inboundData['inbounds'][0]['settings']['clients'] = array_values($inboundData['inbounds'][0]['settings']['clients']);
-                writeJson(INBOUND_CONFIG, $inboundData);
-            }
-            writeJson(MAIN_CONFIG, $mainData);
-            echo json_encode(['success' => true, 'message' => "节点已彻底清理"]); exit;
-        }
-
-        if ($action === 'restart_service') {
-            $mainData = readJson(MAIN_CONFIG);
-            $mainData = syncTestPorts($mainData);
-            writeJson(MAIN_CONFIG, $mainData);
-            exec('sudo /usr/bin/systemctl restart ' . escapeshellarg('v2' . 'ray') . ' > /dev/null 2>&1 &');
-            sleep(1);
-            echo json_encode(['success' => true, 'message' => "配置已保存，服务正在后台平滑重启"]);
-            exit;
-        }
-
-        if ($action === 'test_node_ips') {
-            $mainData = readJson(MAIN_CONFIG);
-            $nodes = array_filter($mainData['outbounds'], fn($o) => !in_array($o['tag'], ['direct', 'block', 'api']));
-            $portMap = [];
-            foreach ($mainData['inbounds'] as $in) {
-                if (strpos($in['tag'] ?? '', 'test_proxy_') === 0) {
-                    $portMap[substr($in['tag'], 11)] = $in['port'];
-                }
-            }
-
-            $mh = curl_multi_init(); $ch_list = []; $results = [];
-            foreach ($nodes as $node) {
-                $tag = $node['tag'];
-                if (isset($portMap[$tag])) {
-                    $ch = curl_init();
-                    curl_setopt($ch, CURLOPT_URL, "http://api.ipify.org");
-                    curl_setopt($ch, CURLOPT_PROXY, "127.0.0.1:" . $portMap[$tag]);
-                    curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5);
-                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                    curl_setopt($ch, CURLOPT_TIMEOUT, 6);
-                    curl_multi_add_handle($mh, $ch);
-                    $ch_list[$tag] = $ch;
-                } else { $results[$tag] = "端口未分配，请先重启"; }
-            }
-
-            $running = null;
-            do { curl_multi_exec($mh, $running); curl_multi_select($mh); } while ($running > 0);
-
-            foreach ($ch_list as $tag => $ch) {
-                $ip = trim(curl_multi_getcontent($ch));
-                $results[$tag] = filter_var($ip, FILTER_VALIDATE_IP) ? $ip : "获取超时或不通";
-                curl_multi_remove_handle($mh, $ch); curl_close($ch);
-            }
-            curl_multi_close($mh);
-
-            file_put_contents(NODE_IP_CACHE, json_encode($results));
-            echo json_encode(['success' => true, 'message' => "真实出口 IP 探测完毕"]);
-            exit;
-        }
-    } catch (Exception $e) {
-        http_response_code(400); echo json_encode(['success' => false, 'error' => $e->getMessage()]); exit;
-    }
-}
-
-function display_login_page($error) {
-    ?>
-    <!DOCTYPE html>
-    <html lang="zh-CN">
-    <head>
-        <meta charset="utf-8"><title>Panel Login</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <style>.glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.1); }</style>
-    </head>
-    <body class="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center min-h-screen font-sans">
-        <div class="absolute inset-0 overflow-hidden pointer-events-none">
-            <div class="absolute -top-40 -right-40 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-[128px] opacity-20"></div>
-            <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-indigo-500 rounded-full mix-blend-multiply filter blur-[128px] opacity-20"></div>
-        </div>
-        <form method="POST" class="glass p-10 rounded-3xl shadow-2xl w-[400px] z-10 text-white relative">
-            <div class="mb-8 text-center">
-                <div class="w-16 h-16 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg">
-                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                </div>
-                <h2 class="text-3xl font-extrabold tracking-tight">IX Matrix</h2>
-            </div>
-            <?php if($error): ?>
-                <div class="bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-3 rounded-xl mb-6 text-sm flex items-center backdrop-blur-md">
-                    <svg class="w-5 h-5 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    <?= $error ?>
-                </div>
-            <?php endif; ?>
-            <div class="space-y-4">
-                <input type="text" name="user" placeholder="Username" class="w-full bg-slate-900/50 border border-slate-700 text-white px-5 py-3 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition" required>
-                <input type="password" name="pass" placeholder="Password" class="w-full bg-slate-900/50 border border-slate-700 text-white px-5 py-3 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition" required>
-            </div>
-            <button type="submit" name="login" class="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3.5 rounded-xl hover:from-indigo-400 hover:to-purple-500 shadow-lg shadow-indigo-500/30 transition-all mt-8">Secure Login</button>
-        </form>
-    </body>
-    </html>
-    <?php
-}
-
-function display_front_login_page($error) {
-    ?>
-    <!DOCTYPE html>
-    <html lang="zh-CN">
-    <head>
-        <meta charset="utf-8"><title>HKIX Front</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <style>.glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.1); }</style>
-    </head>
-    <body class="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center min-h-screen font-sans">
-        <div class="absolute inset-0 overflow-hidden pointer-events-none">
-            <div class="absolute -top-40 -right-40 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-[128px] opacity-20"></div>
-            <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-indigo-500 rounded-full mix-blend-multiply filter blur-[128px] opacity-20"></div>
-        </div>
-        <form method="POST" class="glass p-10 rounded-3xl shadow-2xl w-[400px] z-10 text-white relative">
-            <div class="mb-8 text-center">
-                <div class="w-16 h-16 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg">
-                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                </div>
-                <h2 class="text-3xl font-extrabold tracking-tight">HKIX Front</h2>
-                <p class="text-slate-400 text-sm mt-2">落地节点配置</p>
-            </div>
-            <?php if($error): ?>
-                <div class="bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-3 rounded-xl mb-6 text-sm flex items-center backdrop-blur-md"><?= $error ?></div>
-            <?php endif; ?>
-            <input type="password" name="front_pass" placeholder="Password" class="w-full bg-slate-900/50 border border-slate-700 text-white px-5 py-3 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition" required>
-            <button type="submit" name="front_login" class="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3.5 rounded-xl hover:from-indigo-400 hover:to-purple-500 shadow-lg shadow-indigo-500/30 transition-all mt-8">Open Front Page</button>
-        </form>
-    </body>
-    </html>
-    <?php
-}
-
-function display_front_page() {
-    $data = buildPanelData();
-    ?>
-    <!DOCTYPE html>
-    <html lang="zh-CN">
-    <head>
-        <meta charset="UTF-8"><title>HKIX Front - 落地节点配置</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-        <style>
-            body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f8fafc; }
-            .glass-nav { background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.1); }
-            .table-header { background: rgba(248, 250, 252, 0.9); backdrop-filter: blur(4px); }
-            .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-            .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-            .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        </style>
-    </head>
-    <body class="text-slate-800 antialiased selection:bg-indigo-100 selection:text-indigo-900 pb-16">
-        <nav class="glass-nav text-white px-6 py-4 sticky top-0 z-40 shadow-sm">
-            <div class="max-w-[1200px] mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
-                <div class="flex items-center gap-5">
-                    <div class="text-2xl font-black tracking-tight bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent flex items-center">
-                        <i class="fa-solid fa-bolt mr-2 text-indigo-400"></i>HKIX Front
-                    </div>
-                    <div class="hidden md:flex text-sm bg-slate-800/80 px-4 py-2 rounded-xl border border-slate-700 shadow-inner items-center">
-                        <i class="fa-solid fa-satellite-dish mr-2 text-indigo-400"></i>
-                        <span class="text-slate-300 mr-2">入口:</span>
-                        <span class="font-mono tracking-wider font-bold text-base text-white"><?= FRONT_ENTRY_HOST ?>:<?= htmlspecialchars($data['inbound_port']) ?></span>
-                    </div>
-                </div>
-                <a href="?action=front_logout" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl transition-all flex items-center" title="安全退出">
-                    <i class="fa-solid fa-power-off"></i>
-                </a>
-            </div>
-        </nav>
-
-        <div class="max-w-[1200px] mx-auto mt-8 px-4">
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow">
-                <div class="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-slate-50/50">
-                    <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-server mr-2 text-blue-500 bg-blue-50 p-2 rounded-lg"></i>落地节点配置</h3>
-                    <span class="text-xs font-medium text-slate-500 bg-white border px-3 py-1 rounded-full shadow-sm">点击行或复制按钮获取本地节点配置</span>
-                </div>
-                <div class="overflow-x-auto custom-scrollbar">
-                    <table class="w-full text-left border-collapse">
-                        <thead class="table-header text-slate-500 text-xs font-bold uppercase tracking-wider sticky top-0 z-10">
-                            <tr>
-                                <th class="px-5 py-4 border-b border-slate-200">节点</th>
-                                <th class="px-5 py-4 border-b border-slate-200">落地地址 / 出口IP</th>
-                                <th class="px-5 py-4 border-b border-slate-200">前端用户</th>
-                                <th class="px-5 py-4 border-b border-slate-200 text-center">复制</th>
-                            </tr>
-                        </thead>
-                        <tbody id="frontNodeTable" class="divide-y divide-slate-100 text-sm"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <div id="toast" class="fixed bottom-6 right-6 transform translate-y-24 opacity-0 transition-all duration-300 ease-out px-6 py-4 rounded-xl shadow-2xl z-50 flex items-center gap-3 text-white font-medium max-w-md pointer-events-none border border-white/10 backdrop-blur-md"></div>
-
-        <script>
-            const frontData = <?= json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
-            const FRONT_ENTRY_HOST = <?= json_encode(FRONT_ENTRY_HOST) ?>;
-            const currentInboundPort = frontData.inbound_port || "10183";
-
-            function encodeBase64Utf8(text) {
-                return btoa(unescape(encodeURIComponent(text)));
-            }
-
-            function makeVmess(node) {
-                if (!node.frontend_uuid) return '';
-                const config = {
-                    v: "2",
-                    ps: `HKIX|${node.tag}-${node.config_ip}`,
-                    add: FRONT_ENTRY_HOST,
-                    port: String(currentInboundPort),
-                    id: node.frontend_uuid,
-                    aid: "0",
-                    scy: "auto",
-                    net: "tcp",
-                    type: "none",
-                    host: "",
-                    path: "",
-                    tls: "",
-                    sni: "",
-                    alpn: "",
-                    fp: "",
-                    insecure: "0"
-                };
-                return `vmess://${encodeBase64Utf8(JSON.stringify(config, null, 2))}`;
-            }
-
-            function copyNodeConfig(tag) {
-                const node = frontData.nodes.find(n => n.tag === tag);
-                if (!node) return showToast('未找到对应落地节点', 'error');
-                const link = makeVmess(node);
-                if (!link) return showToast('该节点未绑定前端用户，无法生成配置', 'error');
-                navigator.clipboard.writeText(link).then(() => showToast(`已复制 ${node.tag} 的客户端配置`)).catch(() => showToast('复制失败，请手动选择复制', 'error'));
-            }
-
-            function renderFrontNodes() {
-                document.getElementById('frontNodeTable').innerHTML = frontData.nodes.map(node => {
-                    let isError = node.exit_ip.includes("超时") || node.exit_ip.includes("未分配") || node.exit_ip.includes("待探测");
-                    let statusDot = isError ? `<span class="w-2 h-2 rounded-full bg-red-500 mr-1.5 animate-pulse"></span>` : `<span class="w-2 h-2 rounded-full bg-emerald-500 mr-1.5"></span>`;
-                    let exitIpColor = isError ? "text-slate-500" : "text-emerald-600 font-bold";
-                    let probeClass = node.probe_result === '一致' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : (node.probe_result === '不一致' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-slate-100 text-slate-500 border-slate-200');
-                    return `<tr class="hover:bg-indigo-50/60 transition-colors cursor-pointer group border-b border-transparent hover:border-indigo-100" onclick="copyNodeConfig('${node.tag}')">
-                        <td class="px-5 py-4 whitespace-nowrap">
-                            <div class="font-bold text-slate-800 text-[15px] group-hover:text-indigo-600 transition-colors">${node.tag}</div>
-                            <div class="font-mono text-[12px] text-slate-500 mt-1 opacity-80">${node.uuid}</div>
-                        </td>
-                        <td class="px-5 py-4 whitespace-nowrap text-sm">
-                            <div class="text-slate-500 mb-1.5 flex items-center"><i class="fa-solid fa-arrow-right-to-bracket text-slate-300 mr-2 w-4"></i><span class="font-mono">${node.config_ip} ? <span class="font-bold text-slate-700">${node.latency}</span></span></div>
-                            <div class="flex items-center text-sm"><i class="fa-solid fa-globe text-slate-300 mr-2 w-4"></i>${statusDot}<span class="font-mono ${exitIpColor}">${node.exit_ip}</span><span class="ml-2 px-2 py-0.5 rounded-full border text-[11px] font-bold ${probeClass}">${node.probe_result}</span></div>
-                        </td>
-                        <td class="px-5 py-4 whitespace-nowrap">
-                            <div class="font-medium text-slate-700">${node.frontend_email || '未绑定'}</div>
-                            <div class="font-mono text-[12px] text-slate-500 mt-1">${node.frontend_uuid || ''}</div>
-                        </td>
-                        <td class="px-5 py-4 text-center whitespace-nowrap">
-                            <button onclick="event.stopPropagation(); copyNodeConfig('${node.tag}')" class="text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 p-2.5 rounded-xl transition-all outline-none" title="复制本地客户端 vmess 配置"><i class="fa-solid fa-copy"></i></button>
-                        </td>
-                    </tr>`;
-                }).join('');
-            }
-
-            function showToast(msg, type="success") {
-                const t = document.getElementById('toast');
-                const icon = type === 'success' ? '<i class="fa-solid fa-circle-check text-xl"></i>' : '<i class="fa-solid fa-circle-xmark text-xl"></i>';
-                const bgClass = type === 'success' ? 'bg-slate-800/95 border-emerald-500/50 text-white' : 'bg-red-500/95 border-red-400 text-white shadow-red-500/30';
-                t.innerHTML = `${icon} <span>${msg}</span>`;
-                t.className = `fixed bottom-8 right-8 transform translate-y-0 opacity-100 transition-all duration-400 ease-out px-6 py-4 rounded-2xl shadow-2xl z-50 flex items-center gap-3 font-medium max-w-md pointer-events-none border backdrop-blur-xl ${bgClass}`;
-                setTimeout(() => { t.classList.replace('translate-y-0', 'translate-y-12'); t.classList.replace('opacity-100', 'opacity-0'); }, 3500);
-            }
-
-            renderFrontNodes();
-        </script>
-    </body>
-    </html>
-    <?php
-}
 ?>
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8"><title>IX Matrix - 管理面板</title>
+    <meta charset="UTF-8"><title>统一出口管理 | 线路管理</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -829,17 +239,18 @@ function display_front_page() {
         body.ix-admin-integrated tbody tr:hover { background:#eef2ff66 !important; }
         body.ix-admin-integrated .modal-enter { opacity:1; transform:scale(1); }
         body.ix-admin-integrated #nodeModalCard, body.ix-admin-integrated #clientModalCard, body.ix-admin-integrated #passwordModalCard, body.ix-admin-integrated #subscriptionModalCard { border:1px solid #edf1f7; border-radius:18px !important; box-shadow:0 24px 70px #11182730 !important; }
+        body.ix-admin-integrated .node-type-badge { display:inline-flex; align-items:center; gap:5px; border-radius:999px; padding:3px 8px; font-size:11px; font-weight:900; }
+        body.ix-admin-integrated .node-type-badge.ix { background:#ede9fe; color:#6d28d9; border:1px solid #ddd6fe; }
+        body.ix-admin-integrated .node-type-badge.ixr { background:#dbeafe; color:#1d4ed8; border:1px solid #bfdbfe; }
         @media (max-width: 900px) { body.ix-admin-integrated .ix-hero-inner { flex-direction:column; align-items:flex-start; } body.ix-admin-integrated .ix-toolbar { justify-content:flex-start; } body.ix-admin-integrated .ix-action-label { display:none; } }
     </style>
 </head>
 <body class="text-slate-800 antialiased selection:bg-indigo-100 selection:text-indigo-900 pb-16 relative ix-admin-integrated" data-embedded="<?=isset($_GET['embedded']) ? '1' : '0'?>">
-    
+
     <nav class="glass-nav">
         <div class="ix-hero-inner">
             <div>
-                <div class="ix-kicker"><i class="fa-solid fa-diagram-project"></i>Legacy IX / V2Ray</div>
-                <h1 class="ix-hero-title"><i class="fa-solid fa-bolt"></i>IX Admin</h1>
-                <p class="ix-hero-subtitle">管理原 IX 中转节点、前端用户绑定和订阅导出。</p>
+                <h1 class="ix-hero-title"><i class="fa-solid fa-diagram-project"></i>统一出口管理</h1>
                 <div class="ix-port-row">
                     <button type="button" id="inboundPortBtn" onclick="editInboundPort()" class="ix-port-pill" title="点击修改主监听端口">
                         <i class="fa-solid fa-satellite-dish"></i><span>监听端口</span><b id="inboundPort">---</b>
@@ -850,64 +261,63 @@ function display_front_page() {
                 </div>
             </div>
             <div class="ix-toolbar">
-                <a href="/" class="ix-action" title="返回 IXR"><i class="fa-solid fa-house"></i><span class="ix-action-label">返回 IXR</span></a>
+                <a href="/admin.php?section=ix-admin" class="ix-action" title="返回线路管理"><i class="fa-solid fa-house"></i><span class="ix-action-label">线路管理</span></a>
                 <button id="testIpBtn" onclick="testNodeIps()" class="ix-action" title="穿透测速"><i class="fa-solid fa-network-wired"></i><span class="ix-action-label">穿透测速</span></button>
-                <button id="rebootBtn" onclick="restartService()" class="ix-action primary" title="保存并重启"><i class="fa-solid fa-rotate"></i><span class="ix-action-label">保存并重启</span></button>
+                <button id="rebootBtn" onclick="restartService()" class="ix-action primary" title="重新应用 Xray"><i class="fa-solid fa-rotate"></i><span class="ix-action-label">应用 Xray</span></button>
                 <button onclick="copySubscriptionUrl()" class="ix-action" title="复制订阅"><i class="fa-solid fa-rss"></i><span class="ix-action-label">订阅</span></button>
                 <a href="<?=h(getenv('IX_PANEL_GRAFANA_URL') ?: '#')?>" target="_blank" rel="noopener noreferrer" class="ix-action" title="Grafana 监控"><i class="fa-solid fa-chart-line"></i><span class="ix-action-label">监控</span></a>
-                <a href="?action=logout" class="ix-action danger" title="安全退出"><i class="fa-solid fa-power-off"></i><span class="ix-action-label">退出</span></a>
+                <?php if (!isset($_GET['embedded'])): ?>
+                    <a href="/admin.php?section=account" class="ix-action" title="修改密码"><i class="fa-solid fa-key"></i><span class="ix-action-label">修改密码</span></a>
+                    <a href="?action=logout" class="ix-action danger" title="退出登录"><i class="fa-solid fa-power-off"></i><span class="ix-action-label">退出登录</span></a>
+                <?php endif; ?>
             </div>
         </div>
     </nav>
 
     <div class="ix-admin-summary">
-        <div class="ix-admin-metric"><i class="fa-solid fa-server"></i><div><span>落地节点</span><b id="ixNodeCount">--</b></div></div>
+        <div class="ix-admin-metric"><i class="fa-solid fa-server"></i><div><span>全部出口</span><b id="ixNodeCount">--</b></div></div>
+        <div class="ix-admin-metric"><i class="fa-solid fa-route"></i><div><span>IX 线路</span><b id="ixRouteCount">--</b></div></div>
+        <div class="ix-admin-metric"><i class="fa-solid fa-shuffle"></i><div><span>IXR 专用</span><b id="ixrOnlyCount">--</b></div></div>
         <div class="ix-admin-metric"><i class="fa-solid fa-users"></i><div><span>前端用户</span><b id="ixClientCount">--</b></div></div>
-        <div class="ix-admin-metric"><i class="fa-solid fa-link"></i><div><span>绑定关系</span><b id="ixBoundCount">--</b></div></div>
         <div class="ix-admin-metric"><i class="fa-solid fa-satellite-dish"></i><div><span>监听端口</span><b id="ixInboundMetric">--</b></div></div>
-        <div class="ix-admin-metric"><i class="fa-solid fa-globe"></i><div><span>连接地址</span><b id="ixFrontHostMetric">--</b></div></div>
     </div>
 
     <!-- 主容器 -->
     <div class="ix-admin-layout max-w-[1500px] mx-auto mt-8 px-4 grid grid-cols-1 xl:grid-cols-12 gap-8">
-        
+
         <!-- 左侧：节点与路由区 (比例 7) -->
         <div class="xl:col-span-7 space-y-6">
-            
-            <div class="ix-card bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
-                <div class="flex items-center justify-between mb-5">
-                    <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-link mr-2 text-indigo-500 bg-indigo-50 p-2 rounded-lg"></i>快速导入落地节点</h3>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 mb-5">
-                    <div>
-                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">导出连接地址</label>
-                        <input type="text" id="frontEntryHostInput" placeholder="填写前置转发域名或 IP" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm shadow-inner">
-                    </div>
-                    <button onclick="saveFrontEntryHostFromInput()" class="self-end bg-indigo-600 text-white px-6 py-3 rounded-xl hover:bg-indigo-700 transition shadow-md font-bold whitespace-nowrap flex items-center justify-center">
-                        <i class="fa-solid fa-floppy-disk mr-2"></i>保存地址
-                    </button>
+
+            <div class="ix-card bg-white p-6 rounded-2xl min-h-[154px] flex flex-col justify-between shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+                <div class="flex items-center justify-between gap-3 mb-5">
+                    <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-link mr-2 text-indigo-500 bg-indigo-50 p-2 rounded-lg"></i>新增出口节点</h3>
+                    <button type="button" onclick="openCreateNodeModal()" class="text-sm font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 px-4 py-2 rounded-xl transition"><i class="fa-solid fa-sliders mr-2"></i>手动新增</button>
                 </div>
                 <div class="flex gap-3 relative">
                     <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><i class="fa-solid fa-paste text-slate-400"></i></div>
                     <input type="text" id="vmessInput" placeholder="在此粘贴 vmess:// 链接..." class="flex-1 bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-3 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm shadow-inner">
-                    <button onclick="addNode()" class="bg-slate-800 text-white px-8 py-3 rounded-xl hover:bg-slate-700 transition shadow-md font-medium whitespace-nowrap flex items-center">
+                    <button id="addNodeBtn" type="button" onclick="addNode(event)" class="bg-slate-800 text-white px-8 py-3 rounded-xl hover:bg-slate-700 transition shadow-md font-medium whitespace-nowrap flex items-center">
                         <i class="fa-solid fa-plus mr-2"></i>添加
                     </button>
                 </div>
+                <label class="mt-4 flex items-center gap-3 text-sm font-bold text-slate-700 cursor-pointer w-fit">
+                    <input type="checkbox" id="importEnableIx" checked class="w-4 h-4 accent-indigo-600">
+                    <span>同时加入 IX 线路并生成前端连接</span>
+                </label>
             </div>
 
             <div class="ix-card bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow flex flex-col">
                 <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                    <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-server mr-2 text-blue-500 bg-blue-50 p-2 rounded-lg"></i>落地节点配置</h3>
-                    <span class="text-xs font-medium text-slate-500 bg-white border px-3 py-1 rounded-full shadow-sm">点击行复制客户端配置 | 点击标签编辑 | 点击UUID复制</span>
+                    <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-server mr-2 text-blue-500 bg-blue-50 p-2 rounded-lg"></i>全部出口节点</h3>
+                    <span class="text-xs font-medium text-slate-500 bg-white border px-3 py-1 rounded-full shadow-sm">点击名称编辑完整配置 | IX 线路可绑定前端用户</span>
                 </div>
                 <div class="overflow-x-auto custom-scrollbar">
                     <table class="w-full text-left border-collapse">
                         <thead class="table-header text-slate-500 text-xs font-bold uppercase tracking-wider sticky top-0 z-10">
                             <tr>
-                                <th class="px-5 py-4 border-b border-slate-200">节点标签 & 落地 UUID</th>
-                                <th class="px-5 py-4 border-b border-slate-200">落地地址 / 出口IP</th>
-                                <th class="px-5 py-4 border-b border-slate-200 min-w-[200px]">绑定前端用户</th>
+                                <th class="px-5 py-4 border-b border-slate-200">出口名称 / 类型 / UUID</th>
+                                <th class="px-5 py-4 border-b border-slate-200">落地地址 / 探测出口</th>
+                                <th class="px-5 py-4 border-b border-slate-200 min-w-[220px]">IX 线路设置</th>
                                 <th class="px-5 py-4 border-b border-slate-200 text-center">操作</th>
                             </tr>
                         </thead>
@@ -919,6 +329,18 @@ function display_front_page() {
 
         <!-- 右侧：入站用户区 (比例 5) -->
         <div class="xl:col-span-5 flex flex-col gap-6">
+            <div class="ix-card bg-white p-6 rounded-2xl min-h-[154px] flex flex-col justify-between shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+                <div class="flex items-center justify-between mb-5">
+                    <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-globe mr-2 text-emerald-500 bg-emerald-50 p-2 rounded-lg"></i>导出连接地址</h3>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+                    <input type="text" id="frontEntryHostInput" placeholder="填写前置转发域名或 IP" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm shadow-inner">
+                    <button onclick="saveFrontEntryHostFromInput()" class="self-end bg-indigo-600 text-white px-6 py-3 rounded-xl hover:bg-indigo-700 transition shadow-md font-bold whitespace-nowrap flex items-center justify-center">
+                        <i class="fa-solid fa-floppy-disk mr-2"></i>保存地址
+                    </button>
+                </div>
+            </div>
+
             <div class="ix-card bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow flex flex-col h-full">
                 <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                     <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-users mr-2 text-purple-500 bg-purple-50 p-2 rounded-lg"></i>前端用户配置</h3>
@@ -939,38 +361,51 @@ function display_front_page() {
         </div>
     </div>
 
-    <!-- 弹窗：编辑节点 -->
-    <div id="nodeModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center z-50 transition-opacity opacity-0">
-        <div id="nodeModalCard" class="bg-white rounded-3xl shadow-2xl w-[420px] p-7 transform scale-95 transition-all duration-300">
-            <div class="flex justify-between items-center mb-6">
-                <h3 class="text-xl font-bold text-slate-800">编辑落地节点</h3>
-                <button onclick="closeNodeModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+    <div id="nodeModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-start justify-center z-50 transition-opacity opacity-0 overflow-y-auto px-4 py-6">
+        <div id="nodeModalCard" class="bg-white rounded-3xl shadow-2xl w-full max-w-5xl p-7 transform scale-95 transition-all duration-300 my-auto">
+            <div class="flex justify-between items-start gap-5 mb-6">
+                <div>
+                    <div class="flex items-center gap-3"><h3 id="modalModeTitle" class="text-xl font-bold text-slate-800">编辑出口节点</h3><span id="modalNodeType" class="node-type-badge ixr">IXR 专用</span></div>
+                    <p class="text-sm text-slate-500 mt-2">统一维护出口地址、探测端口、VMess 传输参数和 IX 线路属性。</p>
+                </div>
+                <button type="button" onclick="closeNodeModal()" class="text-slate-400 hover:text-slate-600 p-2"><i class="fa-solid fa-xmark text-xl"></i></button>
             </div>
             <input type="hidden" id="modalOldTag">
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">节点标签 (Tag)</label>
-                    <input type="text" id="modalTag" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">落地地址 (Address)</label>
-                    <input type="text" id="modalAddress" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">落地端口 (Port)</label>
-                    <input type="number" id="modalPort" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">落地 UUID (VMess ID，不能为空)</label>
-                    <input type="text" id="modalUuid" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-[13px] font-mono text-slate-600 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition">
-                </div>
-                <label class="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 cursor-pointer hover:bg-white transition">
-                    <span class="text-sm font-bold text-slate-700">在前台 index.php 展示</span>
-                    <input type="checkbox" id="modalShowOnFront" class="w-5 h-5 accent-indigo-600">
-                </label>
+            <div class="space-y-6">
+                <section class="bg-slate-50/80 border border-slate-200 rounded-2xl p-5">
+                    <h4 class="font-bold text-slate-800 mb-4 flex items-center"><i class="fa-solid fa-server text-indigo-500 mr-2"></i>基础配置</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3">
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">出口名称</label><input type="text" id="modalTag" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">本地探测端口</label><input type="number" id="modalProbePort" placeholder="新增时留空自动分配" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">服务器地址</label><input type="text" id="modalAddress" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">远端端口</label><input type="number" id="modalPort" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                        <div class="md:col-span-2"><label class="block text-xs font-bold text-slate-500 mb-1.5">用户 ID / UUID</label><input type="text" id="modalUuid" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-[13px] font-mono text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                    </div>
+                </section>
+                <section class="bg-slate-50/80 border border-slate-200 rounded-2xl p-5">
+                    <h4 class="font-bold text-slate-800 mb-4 flex items-center"><i class="fa-solid fa-sliders text-blue-500 mr-2"></i>VMess 与传输配置</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-x-4 gap-y-3">
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">AlterID</label><input type="number" id="modalAid" value="0" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">Security</label><input type="text" id="modalSecurity" value="auto" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">Network</label><select id="modalNetwork" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"><option value="tcp">tcp</option><option value="ws">ws</option><option value="grpc">grpc</option></select></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">伪装 Type</label><input type="text" id="modalHeaderType" value="none" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">TLS</label><select id="modalTls" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"><option value="">关闭</option><option value="tls">tls</option></select></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">允许不安全</label><select id="modalInsecure" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"><option value="0">否</option><option value="1">是</option></select></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">Host</label><input type="text" id="modalHost" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">Path / ServiceName</label><input type="text" id="modalPath" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">SNI</label><input type="text" id="modalSni" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">ALPN</label><input type="text" id="modalAlpn" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1.5">Fingerprint</label><input type="text" id="modalFp" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"></div>
+                    </div>
+                </section>
+                <section class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label class="flex items-center justify-between bg-indigo-50 border border-indigo-100 rounded-2xl px-5 py-4 cursor-pointer hover:bg-indigo-100/70 transition"><span><b class="block text-slate-800">启用 IX 线路</b><small class="text-slate-500">生成共享入口线路，可供用户授权及前端连接使用</small></span><input type="checkbox" id="modalEnableIx" onchange="syncNodeTypeControls()" class="w-5 h-5 accent-indigo-600"></label>
+                    <label id="modalShowOnFrontWrap" class="flex items-center justify-between bg-purple-50 border border-purple-100 rounded-2xl px-5 py-4 cursor-pointer hover:bg-purple-100/70 transition"><span><b class="block text-slate-800">前台显示</b><small class="text-slate-500">控制管理员 IX 订阅是否显示该线路</small></span><input type="checkbox" id="modalShowOnFront" class="w-5 h-5 accent-purple-600"></label>
+                </section>
             </div>
-            <div class="mt-8">
-                <button onclick="saveNodeModal()" class="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 transition shadow-lg shadow-indigo-500/30">确认保存</button>
+            <div class="mt-7 flex justify-end gap-3">
+                <button type="button" onclick="closeNodeModal()" class="px-5 py-3 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition">取消</button>
+                <button id="modalSaveButton" type="button" onclick="saveNodeModal()" class="px-7 py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-500/30">保存并应用</button>
             </div>
         </div>
     </div>
@@ -1023,14 +458,14 @@ function display_front_page() {
             <div class='flex justify-between items-start gap-4 mb-6'>
                 <div class='flex items-center gap-3'>
                     <div class='w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center'><i class='fa-solid fa-rss text-lg'></i></div>
-                    <div><h3 class='text-xl font-bold text-slate-800'>选择订阅格式</h3><p class='text-sm text-slate-500 mt-1'>复制适合当前客户端的订阅链接</p></div>
+                    <div><h3 class='text-xl font-bold text-slate-800'>选择订阅格式</h3></div>
                 </div>
                 <button onclick='closeSubscriptionModal()' class='text-slate-400 hover:text-slate-600 p-1'><i class='fa-solid fa-xmark text-xl'></i></button>
             </div>
             <div class='space-y-3'>
-                <button onclick='copyV2raySubscription()' class='w-full text-left border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/60 rounded-2xl p-4 transition-all group flex items-center gap-4'>
+                <button onclick='copyVmessSubscription()' class='w-full text-left border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/60 rounded-2xl p-4 transition-all group flex items-center gap-4'>
                     <span class='w-11 h-11 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors'><i class='fa-solid fa-link'></i></span>
-                    <span class='flex-1'><span class='block font-bold text-slate-800'>V2Ray 订阅链接</span><span class='block text-xs text-slate-500 mt-1'>适用于 v2rayN、v2rayNG、Shadowrocket 等客户端</span></span>
+                    <span class='flex-1'><span class='block font-bold text-slate-800'>VMess 订阅链接</span><span class='block text-xs text-slate-500 mt-1'>适用于 v2rayN、v2rayNG、Shadowrocket 等客户端</span></span>
                     <i class='fa-solid fa-chevron-right text-slate-300 group-hover:text-indigo-500'></i>
                 </button>
                 <button onclick='copySurgeSubscription()' class='w-full text-left border border-slate-200 hover:border-purple-300 hover:bg-purple-50/60 rounded-2xl p-4 transition-all group flex items-center gap-4'>
@@ -1047,6 +482,7 @@ function display_front_page() {
         let nodesCache = [];
         let currentInboundPort = '';
         let frontEntryHost = <?= json_encode(FRONT_ENTRY_HOST) ?>;
+        let addNodePending = false;
         const SUB_URL = <?= json_encode(SUB_PUBLIC_BASE_URL . 'ix-admin.php?sub=' . currentAdminSubscriptionToken(), JSON_UNESCAPED_SLASHES) ?>;
         const SURGE_SUB_URL = SUB_URL + '&format=surge';
 
@@ -1064,10 +500,15 @@ function display_front_page() {
             return btoa(unescape(encodeURIComponent(text)));
         }
 
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>'"]/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[character]));
+        }
+
         function copyNodeConfig(event, tag) {
             event.stopPropagation();
             const node = nodesCache.find(n => n.tag === tag);
             if (!node) return showToast('未找到对应落地节点', 'error');
+            if (!node.is_ix_route) return showToast('该节点当前仅用于 IXR 调度，请先在节点编辑中启用 IX 线路', 'error');
             if (!node.frontend_uuid) return showToast('请先为该落地节点绑定前端用户', 'error');
 
             const config = {
@@ -1116,8 +557,8 @@ function display_front_page() {
             setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('flex'); }, 250);
         }
 
-        function copyV2raySubscription() {
-            copySubscriptionLink(SUB_URL, 'V2Ray');
+        function copyVmessSubscription() {
+            copySubscriptionLink(SUB_URL, 'VMess');
         }
 
         function copySurgeSubscription() {
@@ -1131,8 +572,75 @@ function display_front_page() {
             }).catch(() => showToast('复制失败，请手动选择复制', 'error'));
         }
 
+        function wait(milliseconds) {
+            return new Promise(resolve => setTimeout(resolve, milliseconds));
+        }
+
+        async function requestJson(url, options = {}) {
+            let response;
+            try {
+                response = await fetch(url, {
+                    cache: 'no-store',
+                    credentials: 'same-origin',
+                    ...options
+                });
+            } catch (error) {
+                const networkError = new Error('连接短暂中断');
+                networkError.cause = error;
+                networkError.isNetworkError = true;
+                throw networkError;
+            }
+            const responseText = await response.text();
+            let payload;
+            try {
+                payload = responseText ? JSON.parse(responseText) : {};
+            } catch (error) {
+                const responseError = new Error(`接口返回异常 (${response.status})`);
+                responseError.status = response.status;
+                throw responseError;
+            }
+            if (!response.ok || payload.success === false) {
+                const responseError = new Error(payload.error || payload.message || `请求失败 (${response.status})`);
+                responseError.status = response.status;
+                responseError.payload = payload;
+                throw responseError;
+            }
+            return payload;
+        }
+
+        function vmessNodeTag(uri) {
+            try {
+                if (!uri.startsWith('vmess://')) return '';
+                let encoded = uri.slice(8).trim().replace(/-/g, '+').replace(/_/g, '/');
+                encoded += '='.repeat((4 - encoded.length % 4) % 4);
+                const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+                const payload = JSON.parse(new TextDecoder('utf-8').decode(bytes));
+                return String(payload.ps || '').replace(/[^A-Za-z0-9_-]+/g, '');
+            } catch (error) {
+                return '';
+            }
+        }
+
+        async function confirmNodeState(tag, expectedExists, attempts = 15) {
+            for (let attempt = 0; attempt < attempts; attempt += 1) {
+                try {
+                    const data = await loadData();
+                    const exists = (data.nodes || []).some(node => node.tag === tag);
+                    if (exists === expectedExists) return true;
+                } catch (error) {
+                }
+                await wait(800 + Math.min(attempt, 4) * 250);
+            }
+            return false;
+        }
+
         async function loadData() {
-            const res = await fetch('?api=get_data').then(r => r.json());
+            const response = await fetch(`?api=get_data&_=${Date.now()}`, {
+                cache: 'no-store',
+                credentials: 'same-origin'
+            });
+            const res = await response.json();
+            if (!response.ok) throw new Error(res.error || `加载节点数据失败 (${response.status})`);
             clientsCache = res.clients;
             nodesCache = res.nodes;
             currentInboundPort = res.inbound_port;
@@ -1143,67 +651,79 @@ function display_front_page() {
             if (frontHostInput) frontHostInput.value = frontEntryHost;
 
             const metric = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
-            const boundCount = Object.values(res.bindings || {}).filter(Boolean).length;
             metric('ixNodeCount', (res.nodes || []).length);
+            metric('ixRouteCount', res.ix_route_count ?? (res.nodes || []).filter(node => node.is_ix_route).length);
+            metric('ixrOnlyCount', res.ixr_only_count ?? (res.nodes || []).filter(node => !node.is_ix_route).length);
             metric('ixClientCount', (res.clients || []).length);
-            metric('ixBoundCount', boundCount);
             metric('ixInboundMetric', res.inbound_port || '--');
-            metric('ixFrontHostMetric', frontEntryHost || '--');
-            
+
             const emailCounts = {};
-            Object.values(res.bindings).forEach(email => { if (email) emailCounts[email] = (emailCounts[email] || 0) + 1; });
-            
-            document.getElementById('nodeTable').innerHTML = res.nodes.map(node => {
-                const currentBinding = res.bindings[node.tag] || '';
+            const bindings = res.bindings || {};
+            Object.values(bindings).forEach(email => { if (email) emailCounts[email] = (emailCounts[email] || 0) + 1; });
+
+            const nodeRows = (res.nodes || []).map(node => {
+                const tagKey = encodeURIComponent(node.tag);
+                const currentBinding = bindings[node.tag] || '';
                 const isDuplicate = currentBinding !== '' && emailCounts[currentBinding] > 1;
-                const options = clientsCache.map(c => `<option value="${c.email}" ${c.email === currentBinding ? 'selected' : ''}>${c.email}</option>`).join('');
-                
-                const selectClasses = isDuplicate 
-                    ? 'border-red-300 focus:ring-red-500 bg-red-50 text-red-700' 
+                const options = clientsCache.map(c => `<option value="${escapeHtml(c.email)}" ${c.email === currentBinding ? 'selected' : ''}>${escapeHtml(c.email)}</option>`).join('');
+
+                const selectClasses = isDuplicate
+                    ? 'border-red-300 focus:ring-red-500 bg-red-50 text-red-700'
                     : 'border-slate-200 focus:ring-indigo-500 bg-slate-50 text-slate-700 hover:bg-white';
-                
+
                 const warningMsg = isDuplicate ? `<div class="text-xs text-red-500 mt-2 font-medium flex items-center"><i class="fa-solid fa-triangle-exclamation mr-1.5"></i>已绑定其他节点</div>` : '';
 
-                let exitIpStatus = node.exit_ip;
-                let isError = node.exit_ip.includes("超时") || node.exit_ip.includes("未分配") || node.exit_ip.includes("待探测");
+                const exitIpStatus = String(node.exit_ip || '待探测');
+                const isError = exitIpStatus.includes("超时") || exitIpStatus.includes("未分配") || exitIpStatus.includes("待探测");
                 let statusDot = isError ? `<span class="w-2 h-2 rounded-full bg-red-500 mr-1.5 animate-pulse"></span>` : `<span class="w-2 h-2 rounded-full bg-emerald-500 mr-1.5"></span>`;
                 let exitIpColor = isError ? "text-slate-500" : "text-emerald-600 font-bold";
                 let probeClass = node.probe_result === '一致' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : (node.probe_result === '不一致' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-slate-100 text-slate-500 border-slate-200');
+                const typeBadge = node.is_ix_route
+                    ? '<span class="node-type-badge ix"><i class="fa-solid fa-route"></i>IX 线路</span>'
+                    : '<span class="node-type-badge ixr"><i class="fa-solid fa-shuffle"></i>IXR 专用</span>';
+                const bindingControl = node.is_ix_route ? `
+                    <select onchange="updateBinding(decodeURIComponent('${tagKey}'), this.value)" class="border rounded-xl block w-full px-3 py-2 outline-none transition cursor-pointer text-sm font-medium ${selectClasses}">
+                        <option value="">-- 未绑定 (阻断连接) --</option>
+                        ${options}
+                    </select>
+                    ${warningMsg}` : `
+                    <div class="rounded-xl border border-blue-100 bg-blue-50 px-3 py-3 text-sm text-blue-700">
+                        <div class="font-bold"><i class="fa-solid fa-shuffle mr-1.5"></i>仅参与 IXR 出口调度</div>
+                        <button type="button" onclick="promoteNode(decodeURIComponent('${tagKey}'))" class="mt-2 text-xs font-bold text-indigo-600 hover:text-indigo-800">启用 IX 线路</button>
+                    </div>`;
 
-                // 整行点击事件，左侧 UUID 通过 onclick="copyText..." 独立响应并拦截冒泡
-                return `<tr class="hover:bg-indigo-50/60 transition-colors cursor-pointer group border-b border-transparent hover:border-indigo-100" onclick="copyNodeConfig(event, '${node.tag}')">
+                return `<tr class="hover:bg-indigo-50/60 transition-colors cursor-pointer group border-b border-transparent hover:border-indigo-100" onclick="copyNodeConfig(event, decodeURIComponent('${tagKey}'))">
                     <td class="px-5 py-4 whitespace-nowrap">
-                        <div class="font-bold text-slate-800 text-[15px] group-hover:text-indigo-600 hover:bg-indigo-100 inline-block px-1.5 py-1 rounded transition-colors -ml-1.5" onclick="event.stopPropagation(); openNodeModal('${node.tag}', '${node.config_ip}', '${node.config_port}', '${node.uuid}', ${node.show_on_front ? 'true' : 'false'})" title="点击编辑落地节点">${node.tag}</div>
+                        <div class="flex items-center gap-2 mb-1">${typeBadge}<span class="text-xs text-slate-400 font-mono">${escapeHtml(node.network || 'tcp')}${node.tls ? '+' + escapeHtml(node.tls) : ''}</span></div>
+                        <div class="font-bold text-slate-800 text-[15px] group-hover:text-indigo-600 hover:bg-indigo-100 inline-block px-1.5 py-1 rounded transition-colors -ml-1.5" onclick="event.stopPropagation(); openNodeModal(decodeURIComponent('${tagKey}'))" title="点击编辑完整出口配置">${escapeHtml(node.tag)}</div>
                         <div class="font-mono text-[12px] text-slate-500 mt-1 opacity-80">
-                            <span class="hover:text-indigo-600 hover:bg-indigo-100 px-1.5 py-1 rounded transition-colors -ml-1.5 inline-block" onclick="copyText(event, '${node.uuid}')" title="点击仅复制落地 UUID">${node.uuid}</span>
+                            <span class="hover:text-indigo-600 hover:bg-indigo-100 px-1.5 py-1 rounded transition-colors -ml-1.5 inline-block" onclick="copyText(event, '${escapeHtml(node.uuid)}')" title="点击仅复制落地 UUID">${escapeHtml(node.uuid)}</span>
                         </div>
                     </td>
                     <td class="px-5 py-4 whitespace-nowrap text-sm">
                         <div class="text-slate-500 mb-1.5 flex items-center">
                             <i class="fa-solid fa-arrow-right-to-bracket text-slate-300 mr-2 w-4"></i>
-                            <span class="font-mono">${node.config_ip} ? <span class="font-bold text-slate-700">${node.latency}</span></span>
+                            <span class="font-mono">${escapeHtml(node.config_ip)}:${escapeHtml(node.config_port)} · <span class="font-bold text-slate-700">${escapeHtml(node.latency)}</span></span>
                         </div>
                         <div class="flex items-center text-sm">
                             <i class="fa-solid fa-globe text-slate-300 mr-2 w-4"></i>
                             ${statusDot}
-                            <span class="font-mono ${exitIpColor}">${exitIpStatus}</span>
-                            <span class="ml-2 px-2 py-0.5 rounded-full border text-[11px] font-bold ${probeClass}">${node.probe_result}</span>
+                            <span class="font-mono ${exitIpColor}">${escapeHtml(exitIpStatus)}</span>
+                            <span class="ml-2 px-2 py-0.5 rounded-full border text-[11px] font-bold ${probeClass}">${escapeHtml(node.probe_result)}</span>
                         </div>
+                        <div class="text-xs text-slate-400 mt-2"><i class="fa-solid fa-magnifying-glass mr-1.5"></i>127.0.0.1:${escapeHtml(node.probe_port || '--')}</div>
                     </td>
                     <td class="px-5 py-4" onclick="event.stopPropagation()">
-                        <select onchange="updateBinding('${node.tag}', this.value)" class="border rounded-xl block w-full px-3 py-2 outline-none transition cursor-pointer text-sm font-medium ${selectClasses}">
-                            <option value="">-- 未绑定 (阻断连接) --</option>
-                            ${options}
-                        </select>
-                        ${warningMsg}
+                        ${bindingControl}
                     </td>
                     <td class="px-5 py-4 text-center whitespace-nowrap" onclick="event.stopPropagation()">
-                        <button onclick="deleteNode('${node.tag}')" class="text-slate-400 hover:text-red-500 hover:bg-red-50 p-2.5 rounded-xl transition-all outline-none" title="彻底删除此节点">
+                        <button type="button" onclick="deleteNode(event, decodeURIComponent('${tagKey}'))" class="text-slate-400 hover:text-red-500 hover:bg-red-50 p-2.5 rounded-xl transition-all outline-none" title="彻底删除此节点">
                             <i class="fa-solid fa-trash-can"></i>
                         </button>
                     </td>
                 </tr>`;
             }).join('');
+            document.getElementById('nodeTable').innerHTML = nodeRows || '<tr><td colspan="4" class="px-5 py-12 text-center text-slate-400">暂无出口节点</td></tr>';
 
             // 右侧列表：精准点击 UUID 进行复制，拦截弹窗冒泡
             document.getElementById('clientTable').innerHTML = res.clients.map(c => `
@@ -1216,37 +736,124 @@ function display_front_page() {
                     </td>
                 </tr>
             `).join('');
+            return res;
         }
 
-        // --- 模态框控制逻辑 ---
-        function openNodeModal(tag, address, port, uuid, showOnFront) {
-            document.getElementById('modalOldTag').value = tag;
-            document.getElementById('modalTag').value = tag;
-            document.getElementById('modalAddress').value = address;
-            document.getElementById('modalPort').value = port;
-            document.getElementById('modalUuid').value = uuid;
-            document.getElementById('modalShowOnFront').checked = showOnFront !== false;
+        function setSelectValue(id, value) {
+            const select = document.getElementById(id);
+            const normalized = String(value ?? '');
+            if (![...select.options].some(option => option.value === normalized)) select.add(new Option(normalized, normalized));
+            select.value = normalized;
+        }
+
+        function syncNodeTypeControls() {
+            const enabled = document.getElementById('modalEnableIx').checked;
+            const badge = document.getElementById('modalNodeType');
+            const frontWrap = document.getElementById('modalShowOnFrontWrap');
+            const frontToggle = document.getElementById('modalShowOnFront');
+            badge.className = `node-type-badge ${enabled ? 'ix' : 'ixr'}`;
+            badge.innerHTML = enabled ? '<i class="fa-solid fa-route"></i>IX 线路' : '<i class="fa-solid fa-shuffle"></i>IXR 专用';
+            frontToggle.disabled = !enabled;
+            frontWrap.classList.toggle('opacity-50', !enabled);
+        }
+
+        function populateNodeModal(node, createMode=false) {
+            document.getElementById('modalModeTitle').textContent = createMode ? '手动新增出口节点' : '编辑出口节点';
+            document.getElementById('modalOldTag').value = createMode ? '' : (node.tag || '');
+            document.getElementById('modalTag').value = node.tag || '';
+            document.getElementById('modalProbePort').value = node.probe_port || '';
+            document.getElementById('modalAddress').value = node.config_ip || '';
+            document.getElementById('modalPort').value = node.config_port || '';
+            document.getElementById('modalUuid').value = node.uuid || '';
+            document.getElementById('modalAid').value = node.aid ?? 0;
+            document.getElementById('modalSecurity').value = node.security || 'auto';
+            setSelectValue('modalNetwork', node.network || 'tcp');
+            document.getElementById('modalHeaderType').value = node.header_type || 'none';
+            setSelectValue('modalTls', node.tls || '');
+            setSelectValue('modalInsecure', String(node.insecure || '0') === '1' ? '1' : '0');
+            document.getElementById('modalHost').value = node.host || '';
+            document.getElementById('modalPath').value = node.path || '';
+            document.getElementById('modalSni').value = node.sni || '';
+            document.getElementById('modalAlpn').value = node.alpn || '';
+            document.getElementById('modalFp').value = node.fp || '';
+            document.getElementById('modalEnableIx').checked = createMode ? true : node.is_ix_route === true;
+            document.getElementById('modalShowOnFront').checked = createMode ? true : node.show_on_front === true;
+            syncNodeTypeControls();
             const m = document.getElementById('nodeModal'); const c = document.getElementById('nodeModalCard');
             m.classList.remove('hidden'); m.classList.add('flex');
             setTimeout(() => { m.classList.remove('opacity-0'); c.classList.add('modal-enter'); }, 10);
         }
+
+        function openNodeModal(tag) {
+            const node = nodesCache.find(item => item.tag === tag);
+            if (!node) return showToast('未找到对应出口节点', 'error');
+            populateNodeModal(node, false);
+        }
+
+        function openCreateNodeModal() {
+            populateNodeModal({aid:0, security:'auto', network:'tcp', header_type:'none', tls:'', insecure:'0'}, true);
+        }
+
+        function promoteNode(tag) {
+            openNodeModal(tag);
+            document.getElementById('modalEnableIx').checked = true;
+            document.getElementById('modalShowOnFront').checked = true;
+            syncNodeTypeControls();
+        }
+
         function closeNodeModal() {
             const m = document.getElementById('nodeModal'); const c = document.getElementById('nodeModalCard');
             m.classList.add('opacity-0'); c.classList.remove('modal-enter');
             setTimeout(() => { m.classList.add('hidden'); m.classList.remove('flex'); }, 300);
         }
+
         async function saveNodeModal() {
             const oldTag = document.getElementById('modalOldTag').value;
-            const newTag = document.getElementById('modalTag').value;
-            const newAddress = document.getElementById('modalAddress').value;
-            const newPort = document.getElementById('modalPort').value;
-            const newUuid = document.getElementById('modalUuid').value;
-            const showOnFront = document.getElementById('modalShowOnFront').checked;
-            if (!newAddress.trim()) { showToast('落地地址不能为空', 'error'); return; }
-            if (!newUuid.trim()) { showToast('落地 UUID 不能为空', 'error'); return; }
-            closeNodeModal();
-            const res = await fetch('?api=edit_node', {method: 'POST', body: JSON.stringify({old_tag: oldTag, new_tag: newTag, new_address: newAddress, new_port: newPort, new_uuid: newUuid, show_on_front: showOnFront})}).then(r => r.json());
-            if(res.success) { showToast(`${res.message}，请重启生效`); loadData(); } else showToast(res.error, "error");
+            const payload = {
+                old_tag: oldTag,
+                name: document.getElementById('modalTag').value.trim(),
+                probe_port: document.getElementById('modalProbePort').value.trim(),
+                address: document.getElementById('modalAddress').value.trim(),
+                remote_port: document.getElementById('modalPort').value.trim(),
+                id: document.getElementById('modalUuid').value.trim(),
+                aid: document.getElementById('modalAid').value.trim(),
+                security: document.getElementById('modalSecurity').value.trim(),
+                network: document.getElementById('modalNetwork').value.trim(),
+                header_type: document.getElementById('modalHeaderType').value.trim(),
+                tls: document.getElementById('modalTls').value.trim(),
+                insecure: document.getElementById('modalInsecure').value,
+                host: document.getElementById('modalHost').value.trim(),
+                path: document.getElementById('modalPath').value.trim(),
+                sni: document.getElementById('modalSni').value.trim(),
+                alpn: document.getElementById('modalAlpn').value.trim(),
+                fp: document.getElementById('modalFp').value.trim(),
+                enable_ix: document.getElementById('modalEnableIx').checked,
+                show_on_front: document.getElementById('modalShowOnFront').checked
+            };
+            if (!payload.name) return showToast('出口名称不能为空', 'error');
+            if (!payload.address) return showToast('服务器地址不能为空', 'error');
+            if (!payload.remote_port) return showToast('远端端口不能为空', 'error');
+            if (!payload.id) return showToast('用户 ID / UUID 不能为空', 'error');
+            const button = document.getElementById('modalSaveButton');
+            const originalHtml = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>正在应用...';
+            try {
+                const action = oldTag ? 'edit_node' : 'create_node';
+                const res = await requestJson(`?api=${action}&_=${Date.now()}`, {
+                    method: 'POST',
+                    headers: {'Accept':'application/json','Content-Type':'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                closeNodeModal();
+                showToast(res.message || '出口配置已保存');
+                await loadData();
+            } catch (error) {
+                showToast(error.message || '出口配置保存失败', 'error');
+            } finally {
+                button.disabled = false;
+                button.innerHTML = originalHtml;
+            }
         }
 
         function openClientModal(email, uuid) {
@@ -1267,7 +874,7 @@ function display_front_page() {
             const newUuid = document.getElementById('modalClientUuid').value;
             closeClientModal();
             const res = await fetch('?api=edit_client_uuid', {method: 'POST', body: JSON.stringify({email: email, new_uuid: newUuid})}).then(r => r.json());
-            if(res.success) { showToast(`${res.message}，请重启生效`); loadData(); } else showToast(res.error, "error");
+            if(res.success) { showToast(res.message); loadData(); } else showToast(res.error, "error");
         }
 
         function openPasswordModal() {
@@ -1296,7 +903,7 @@ function display_front_page() {
             const input = prompt(`修改主监听端口\n\n⚠️ 请确保服务器防火墙已放行新端口。\n\n输入 1-65535 之间的数字：`, currentInboundPort);
             if (input === null || input.trim() === '' || input.trim() == currentInboundPort) return;
             const res = await fetch('?api=edit_inbound_port', {method: 'POST', body: JSON.stringify({new_port: input.trim()})}).then(r => r.json());
-            if(res.success) { showToast(`${res.message}，请重启生效`); loadData(); } else showToast(res.error, "error");
+            if(res.success) { showToast(res.message); loadData(); } else showToast(res.error, "error");
         }
 
         async function editFrontEntryHost() {
@@ -1329,20 +936,89 @@ function display_front_page() {
 
         async function updateBinding(tag, email) {
             const res = await fetch('?api=update_binding', {method: 'POST', body: JSON.stringify({tag, email})}).then(r => r.json());
-            if(res.success) { showToast('路由调度已更新，请点击【保存并重启】生效'); loadData(); }
+            if(res.success) { showToast(res.message || '路由调度已同步到 Xray'); loadData(); }
         }
 
-        async function addNode() {
-            const uri = document.getElementById('vmessInput').value;
+        async function addNode(event) {
+            event.preventDefault();
+            if (addNodePending) return;
+            const input = document.getElementById('vmessInput');
+            const uri = input.value.trim();
             if(!uri) return showToast('请输入 vmess 链接', "error");
-            const res = await fetch('?api=add_node_from_uri', {method: 'POST', body: JSON.stringify({uri})}).then(r => r.json());
-            if(res.success) { showToast('节点添加成功'); loadData(); document.getElementById('vmessInput').value = ''; } else showToast(res.error, "error");
+            const tag = vmessNodeTag(uri);
+            const enableIx = document.getElementById('importEnableIx').checked;
+            const button = event.currentTarget || document.getElementById('addNodeBtn');
+            const originalHtml = button.innerHTML;
+            addNodePending = true;
+            button.disabled = true;
+            button.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>正在添加...';
+            button.classList.add('opacity-60', 'cursor-wait');
+            try {
+                const res = await requestJson(`?api=add_node_from_uri&_=${Date.now()}`, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({uri, enable_ix: enableIx})
+                });
+                input.value = '';
+                showToast(res.message || '节点添加成功');
+                if (tag) {
+                    await confirmNodeState(tag, true, 8);
+                } else {
+                    await loadData();
+                }
+            } catch (error) {
+                if (error.isNetworkError && tag) {
+                    showToast('连接短暂中断，正在确认节点是否已添加', 'info');
+                    if (await confirmNodeState(tag, true)) {
+                        input.value = '';
+                        showToast(`节点 ${tag} 已添加，列表已刷新`);
+                        return;
+                    }
+                }
+                showToast(error.message || '节点添加失败，请重试', 'error');
+            } finally {
+                addNodePending = false;
+                button.disabled = false;
+                button.innerHTML = originalHtml;
+                button.classList.remove('opacity-60', 'cursor-wait');
+            }
         }
 
-        async function deleteNode(tag) {
-            if(!confirm(`⚠️ 危险操作\n\n确定彻底删除 [ ${tag} ] 节点及绑定的路由吗？此操作不可恢复。`)) return;
-            const res = await fetch('?api=delete_node', {method: 'POST', body: JSON.stringify({tag})}).then(r => r.json());
-            if(res.success) { showToast(res.message); loadData(); }
+        async function deleteNode(event, tag) {
+            event.preventDefault();
+            event.stopPropagation();
+            if(!confirm(`⚠️ 危险操作\n\n确定彻底删除 [ ${tag} ] 出口吗？相关 IX 线路、用户授权、自动池和端口规则引用会一起移除。`)) return;
+            const button = event.currentTarget;
+            const originalHtml = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            button.classList.add('opacity-60', 'cursor-wait');
+            try {
+                const res = await requestJson(`?api=delete_node&_=${Date.now()}`, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({tag})
+                });
+                showToast(res.message || `节点 ${tag} 已删除`);
+                await confirmNodeState(tag, false, 8);
+            } catch (error) {
+                showToast('正在确认删除结果，请稍候', 'info');
+                if (await confirmNodeState(tag, false)) {
+                    showToast(`节点 ${tag} 已删除，列表已刷新`);
+                    return;
+                }
+                showToast(error.message || '删除失败，请重试', 'error');
+            } finally {
+                button.disabled = false;
+                button.innerHTML = originalHtml;
+                button.classList.remove('opacity-60', 'cursor-wait');
+            }
         }
 
         async function restartService() {
@@ -1377,14 +1053,14 @@ function display_front_page() {
 
         function showToast(msg, type="success") {
             const t = document.getElementById('toast');
-            const icon = type === 'success' ? '<i class="fa-solid fa-circle-check text-xl"></i>' : '<i class="fa-solid fa-circle-xmark text-xl"></i>';
-            const bgClass = type === 'success' ? 'bg-slate-800/95 border-emerald-500/50 text-white' : 'bg-red-500/95 border-red-400 text-white shadow-red-500/30';
+            const icon = type === 'success' ? '<i class="fa-solid fa-circle-check text-xl"></i>' : (type === 'info' ? '<i class="fa-solid fa-spinner fa-spin text-xl"></i>' : '<i class="fa-solid fa-circle-xmark text-xl"></i>');
+            const bgClass = type === 'success' ? 'bg-slate-800/95 border-emerald-500/50 text-white' : (type === 'info' ? 'bg-blue-600/95 border-blue-400 text-white shadow-blue-500/30' : 'bg-red-500/95 border-red-400 text-white shadow-red-500/30');
             t.innerHTML = `${icon} <span>${msg}</span>`;
             t.className = `fixed bottom-8 right-8 transform translate-y-0 opacity-100 transition-all duration-400 ease-out px-6 py-4 rounded-2xl shadow-2xl z-50 flex items-center gap-3 font-medium max-w-md pointer-events-none border backdrop-blur-xl ${bgClass}`;
             setTimeout(() => { t.classList.replace('translate-y-0', 'translate-y-12'); t.classList.replace('opacity-100', 'opacity-0'); }, 3500);
         }
 
-        loadData();
+        loadData().catch(error => showToast(error.message || '节点数据加载失败', 'error'));
     </script>
 </body>
 </html>

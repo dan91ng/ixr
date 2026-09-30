@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 import fcntl
 import json
 import os
@@ -8,9 +8,11 @@ import sys
 import time
 from pathlib import Path
 
-DATA = Path('/opt/ixr-manager/data')
+BASE = Path(os.environ.get('IXR_BASE', '/opt/ixr-manager'))
+DATA = Path(os.environ.get('IXR_DATA', str(BASE / 'data')))
 STATUS = DATA / 'apply_status.json'
-LOCK = Path('/tmp/ixr-apply-async.lock')
+LOCK = Path(os.environ.get('IXR_APPLY_ASYNC_LOCK', str(DATA / 'apply.lock')))
+APPLY_COMMAND = os.environ.get('IXR_APPLY_COMMAND', '/usr/local/bin/ixr-apply')
 
 
 def write_status(payload):
@@ -25,10 +27,30 @@ def write_status(payload):
         pass
 
 
+def open_lock_file():
+    DATA.mkdir(parents=True, exist_ok=True)
+    LOCK.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0)
+    descriptor = os.open(LOCK, flags, 0o660)
+    os.fchmod(descriptor, 0o660)
+    try:
+        shutil.chown(LOCK, 'www-data', 'www-data')
+    except Exception:
+        pass
+    return os.fdopen(descriptor, 'r+')
+
+
+def apply_command():
+    direct = str(os.environ.get('IXR_APPLY_ASYNC_DIRECT', '')).strip().lower() in {'1', 'true', 'yes'}
+    if os.geteuid() == 0 or direct:
+        return [APPLY_COMMAND]
+    return ['sudo', APPLY_COMMAND]
+
+
 def main():
     reason = ' '.join(sys.argv[1:]).strip()[:400] or '配置变更'
     started = int(time.time())
-    with LOCK.open('w') as lock_file:
+    with open_lock_file() as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
         write_status({
             'status': 'running',
@@ -40,7 +62,7 @@ def main():
         })
         try:
             proc = subprocess.run(
-                ['sudo', '/usr/local/bin/ixr-apply'],
+                apply_command(),
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

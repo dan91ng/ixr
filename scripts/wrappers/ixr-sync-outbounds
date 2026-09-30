@@ -1,2 +1,2 @@
-#!/bin/sh
-exec /usr/bin/python3 /opt/ixr-manager/bin/ixr_sync_outbounds.py
+#!/usr/bin/env bash
+exec /usr/bin/python3 /opt/ixr-manager/bin/ixr_sync_outbounds.py "$@"

@@ -1,2 +1,2 @@
-#!/bin/sh
+#!/usr/bin/env bash
 exec /usr/bin/python3 /opt/ixr-manager/bin/ixr_apply_async.py "$@"

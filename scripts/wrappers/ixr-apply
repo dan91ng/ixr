@@ -1,3 +1,2 @@
-#!/bin/sh
-[ -r /etc/default/ixr-manager ] && . /etc/default/ixr-manager
-exec /usr/bin/python3 /opt/ixr-manager/bin/ixr_apply.py
+#!/usr/bin/env bash
+exec /usr/bin/python3 /opt/ixr-manager/bin/ixr_apply.py "$@"

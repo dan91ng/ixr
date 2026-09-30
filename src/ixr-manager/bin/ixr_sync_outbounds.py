@@ -15,7 +15,7 @@ def main():
         count = 0
     print('CHANGED=0')
     print('MODE=independent')
-    print('MESSAGE=IXR 出口已独立管理，不再从 legacy IX manager / 旧 V2Ray 同步')
+    print('MESSAGE=IXR 出口已独立管理，不再从 ix.cloudc.dev / 旧 V2Ray 同步')
     print(f'OUTBOUNDS={count}')
     return 0
 

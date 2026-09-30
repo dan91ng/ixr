@@ -1,15 +1,21 @@
-# runtime/private data
+﻿# runtime/private data
 src/ixr-manager/data/*.json
 !src/ixr-manager/data/*.example.json
 !src/ixr-manager/data/.gitkeep
+src/ixr-manager/data/*.db
+src/ixr-manager/data/*.db-*
+src/ixr-manager/data/*.log
+src/ixr-manager/backups/
 
-# generated/cache
+# generated/cache/backups
 *.tar.gz
+*.tgz
 *.zip
 *.log
 *.tmp
-__pycache__/
+*.bak
 *.pyc
+__pycache__/
 
 # local editor/system
 .DS_Store

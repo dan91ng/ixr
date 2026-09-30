@@ -1,72 +1,57 @@
-# IXR
+# IXR Manager
 
-IXR is a small Web manager for an independent Xray router. It manages VMess inbound ports, outbound nodes, smart outbound pools, rule routing, health checks and usage stats.
+IXR Manager is a web management system for an Xray-based independent router. It manages VMess inbound ports, outbound nodes, smart outbound pools, IX/IXR route bindings, users, quotas, subscription links, health checks and usage statistics.
 
-This is a sanitized source snapshot. It does **not** include real nodes, UUIDs, passwords, runtime logs, Xray binaries or private deployment data.
+This repository contains a **sanitized source snapshot** generated from the current production codebase. It does not include real users, runtime databases, node credentials, subscription tokens, password hashes, generated Xray configs or private deployment archives.
 
-## Disclaimer
+## Main features
 
-This project is provided for lawful self-hosting, learning, and network management only. Users are solely responsible for how they deploy and use it, including compliance with local laws, service terms, and third-party rights.
+- Unified IX and IXR outbound management.
+- VMess inbound and outbound generation for Xray.
+- Smart auto pool with health checks and DN42-aware probing.
+- User creation, status, expiry time and traffic quota management.
+- Per-user IXR port authorization and shared IX route allocation.
+- User portal with account status, node list, v2rayN/v2rayNG tutorials and VMess/Surge subscriptions.
+- Xray API usage statistics and quota enforcement.
+- Admin helpers for applying config asynchronously and syncing runtime users.
 
-## Layout
+## Repository layout
 
-- `src/ixr-manager/public/index.php` - Web UI
-- `src/ixr-manager/public/ix-admin.php` - integrated legacy IX admin page
-- `src/ixr-manager/bin/` - IXR apply, health check, usage stats and async helpers
-- `src/ixr-manager/data/*.example.json` - safe example configs
-- `src/ix-panel/public/` - sanitized legacy IX V2Ray panel
-- `deploy/systemd/` - systemd service/timer templates
-- `deploy/nginx/` - Nginx site templates
-- `scripts/wrappers/` - `/usr/local/bin/ixr-*` wrappers
-- `install.sh` - source checkout installer
+```text
+src/ixr-manager/public/       PHP admin/user/subscription pages
+src/ixr-manager/public/lib/   shared PHP stores and Xray admin helper
+src/ixr-manager/bin/          Python apply, health, usage and sync tasks
+src/ixr-manager/migrations/   SQLite schema migrations
+src/ixr-manager/data/         safe example JSON files only
+deploy/nginx/                 Nginx templates
+deploy/systemd/               systemd services and timers
+deploy/sudoers/               sudoers rule for controlled admin helper
+scripts/wrappers/             /usr/local/bin wrappers
+install.sh                    simple installer for a fresh host
+```
 
 ## Quick install
 
 ```bash
-sudo IXR_DOMAIN=ixr.example.com   IXR_WEB_PORT=10198   IXR_EXPORT_ADDRESS=proxy.example.com   IXR_ADMIN_USER=admin   IXR_ADMIN_PASSWORD=change-me   bash install.sh
+sudo IXR_DOMAIN=ixr.example.com \
+  IXR_WEB_PORT=10198 \
+  IXR_EXPORT_ADDRESS=proxy.example.com \
+  IXR_ADMIN_USER=admin \
+  IXR_ADMIN_PASSWORD=change-me \
+  bash install.sh
 ```
 
-Optional DN42 DNS override:
+## Runtime data that must not be committed
+
+Do not commit users databases, password hashes, real runtime JSON files, UUIDs, tokens, generated Xray configs, production backups or logs. `.gitignore` keeps runtime JSON files out of Git except `*.example.json`.
+
+## Development checks
 
 ```bash
-sudo IXR_DN42_DNS_SERVERS=your-dn42-dns-ip bash install.sh
+find src/ixr-manager/public -name '*.php' -print0 | xargs -0 -n1 php -l
+python3 -m py_compile src/ixr-manager/bin/*.py
 ```
 
-After install, edit:
+## Current source baseline
 
-- `/opt/ixr-manager/data/outbounds.json`
-- `/opt/ixr-manager/data/state.json`
-- `/opt/ixr-manager/data/export.json`
-
-Then run:
-
-```bash
-/usr/local/bin/ixr-apply
-/usr/local/bin/ixr-health-check
-/usr/local/bin/ixr-usage-stats
-```
-
-## Do not commit real values
-
-- Web admin passwords
-- VMess UUIDs and imported links
-- Private server IPs/domains
-- Runtime `health.json`, `usage.json`, `apply_status.json`
-- Generated `/usr/local/etc/xray/config.json`
-
-## Legacy IX panel
-
-The legacy IX admin page is integrated into IXR at `/ix-admin.php` and can also be opened from the IXR sidebar through `IX Admin`. It manages the existing 233boy V2Ray files on the same server while IXR continues to manage its independent Xray router separately.
-
-`src/ix-panel/public/` is kept as a sanitized standalone reference copy. Configure secrets and public domains with environment variables or replace the example values during deployment.
-
-Common environment variables:
-
-- `IX_PANEL_ADMIN_USER`
-- `IX_PANEL_ADMIN_PASSWORD`
-- `IX_PANEL_FRONT_PASSWORD`
-- `IX_PANEL_FRONT_ENTRY_HOST`
-- `IX_PANEL_PUBLIC_BASE_URL`
-- `IX_PANEL_GRAFANA_URL`
-
-When using the integrated `/ix-admin.php` page, login is handled by IXR. The legacy IX admin password variables are only needed for standalone legacy deployments.
+Source code pulled from the synchronized DE/production IXR deployment. Backup archives are stored outside this repository on the MCP host desktop. This Git tree is sanitized for publication and review.
