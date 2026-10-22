@@ -304,6 +304,14 @@ function buildPanelData(): array
                     <input type="checkbox" id="importEnableIx" checked class="w-4 h-4 accent-indigo-600">
                     <span>同时加入 IX 线路并生成前端连接</span>
                 </label>
+                <div class="flex flex-wrap items-end gap-3">
+                    <label class="flex-1 min-w-[140px] text-sm font-bold text-slate-700">监听端口
+                        <input type="number" id="sharedInboundPortInput" min="1" max="65535" step="1" placeholder="1–65535" class="mt-2 w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm">
+                    </label>
+                    <button type="button" id="saveSharedInboundPortBtn" onclick="saveSharedInboundPort()" class="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold">保存端口</button>
+                    <p class="w-full text-xs text-slate-500">修改实际 Xray 共享监听端口并同步线路导出端口；不影响 Web 端口。请同步调整防火墙及前置转发。</p>
+                </div>
+                </div>
             </div>
 
             <div class="ix-card bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow flex flex-col">
@@ -333,7 +341,8 @@ function buildPanelData(): array
                 <div class="flex items-center justify-between mb-5">
                     <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-globe mr-2 text-emerald-500 bg-emerald-50 p-2 rounded-lg"></i>导出连接地址</h3>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+                <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(140px,180px);gap:16px;align-items:start">
+                <div class="grid grid-cols-1 gap-3">
                     <input type="text" id="frontEntryHostInput" placeholder="填写前置转发域名或 IP" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm shadow-inner">
                     <button onclick="saveFrontEntryHostFromInput()" class="self-end bg-indigo-600 text-white px-6 py-3 rounded-xl hover:bg-indigo-700 transition shadow-md font-bold whitespace-nowrap flex items-center justify-center">
                         <i class="fa-solid fa-floppy-disk mr-2"></i>保存地址
@@ -649,6 +658,8 @@ function buildPanelData(): array
             document.getElementById('frontEntryHost').textContent = frontEntryHost;
             const frontHostInput = document.getElementById('frontEntryHostInput');
             if (frontHostInput) frontHostInput.value = frontEntryHost;
+            const portInput = document.getElementById('sharedInboundPortInput');
+            if (portInput) portInput.value = res.inbound_port || '';
 
             const metric = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
             metric('ixNodeCount', (res.nodes || []).length);
@@ -899,6 +910,29 @@ function buildPanelData(): array
         }
 
         // --- 其他原逻辑 ---
+        async function saveSharedInboundPort() {
+            const input = document.getElementById('sharedInboundPortInput');
+            const value = (input.value || '').trim();
+            const port = Number(value);
+            if (!/^\d+$/.test(value) || !Number.isInteger(port) || port < 1 || port > 65535)
+                return showToast('监听端口必须为 1–65535 的整数', 'error');
+            if (port === Number(currentInboundPort)) return showToast('端口未变更');
+            if (!confirm(`将 Xray 共享监听端口修改为 ${port}？已有客户端及前置转发需要同步调整。`)) return;
+            const button = document.getElementById('saveSharedInboundPortBtn');
+            button.disabled = true;
+            try {
+                const response = await fetch('?api=edit_inbound_port', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({new_port: port})
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) throw new Error(result.error || '保存端口失败');
+                showToast(result.message); await loadData();
+            } catch (error) { showToast(error.message, 'error'); }
+            finally { button.disabled = false; }
+        }
+
         async function editInboundPort() {
             const input = prompt(`修改主监听端口\n\n⚠️ 请确保服务器防火墙已放行新端口。\n\n输入 1-65535 之间的数字：`, currentInboundPort);
             if (input === null || input.trim() === '' || input.trim() == currentInboundPort) return;
