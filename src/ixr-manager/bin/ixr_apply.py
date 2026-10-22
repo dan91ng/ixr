@@ -886,9 +886,6 @@ def main():
     if not state['ports']:
         state = normalize_state(default_state())
     outbounds = discover_outbounds()
-    if not outbounds:
-        print('ERROR: 未配置 IXR 自管出口，请先在出口管理中导入或保存至少一个 VMess 出口', file=sys.stderr)
-        return 2
     write_json(STATE, state)
     write_json(OUTS, managed_outbounds(outbounds))
     ixr_port_assignments = active_ixr_port_assignments()
@@ -896,6 +893,15 @@ def main():
     ix_assignments = active_ix_assignments()
     ix_summary = {}
     cfg = build_config(state, outbounds, ixr_port_assignments, ix_legacy, ix_assignments, ix_summary)
+    if not outbounds:
+        # Empty is a valid catalog after deleting the final exit. Fail closed:
+        # do not fall back to direct traffic from auto-pool rules.
+        for rule in cfg.get('routing', {}).get('rules', []):
+            if 'balancerTag' in rule:
+                rule.pop('balancerTag')
+                rule['outboundTag'] = 'blocked'
+        cfg.get('routing', {})['balancers'] = []
+        cfg.pop('observatory', None)
     XRAY_CONFIG.parent.mkdir(parents=True, exist_ok=True)
     staged_config = Path(str(XRAY_CONFIG) + '.ixr-stage.json')
     rollback_config = Path(str(XRAY_CONFIG) + '.ixr-rollback')

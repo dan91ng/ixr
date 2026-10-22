@@ -401,7 +401,10 @@ def normalize_managed_outbound(item):
 
 def add_legacy_ix_binding(legacy, route_code):
     shared = shared_inbound(legacy)
-    clients = (shared.get('settings') or {}).get('clients') or []
+    settings = shared.setdefault('settings', {})
+    if not isinstance(settings.get('clients'), list):
+        settings['clients'] = []
+    clients = settings['clients']
     used_emails = {str(item.get('email') or '') for item in clients if isinstance(item, dict)}
     email_base = safe_tag(route_code).lower() or 'ix-node'
     email = email_base + '@v2ray.com'
