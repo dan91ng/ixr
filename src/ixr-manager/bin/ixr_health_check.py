@@ -145,23 +145,22 @@ def probe_tcp_connect(outbound):
 
 
 def probe_node(outbound):
-    is_dn42 = 'DN42' in str(outbound.get('name', '')).upper()
-    targets = DN42_TARGETS if is_dn42 else TARGETS
-    # DN42 looking-glass targets are often slow/partial and may timeout even when
-    # the VMess landing itself is reachable.  Treat DN42 as usable when either
-    # one DN42 HTTP probe succeeds OR the remote VMess TCP endpoint is reachable.
-    # This prevents false auto-isolation of usable DN42 exits such as TH-DN42/US-DN42.
-    required_ok = 1 if is_dn42 else 4
-    port = int(outbound.get('probe_port') or outbound.get('port') or 0)
-    details = [probe_one(port, url) for url in targets]
-    ok_details = [item for item in details if item['ok']]
-    latency_values = [item['latency'] for item in ok_details if item['latency'] is not None]
+    # Lightweight availability probe: only one TCP connect attempt to the
+    # node endpoint, similar to a telnet-style port-open check.
+    # No HTTP/HTTPS request is sent to external probe URLs such as map.dn42,
+    # Google or Cloudflare.
     tcp_latency, tcp_detail = probe_tcp_connect(outbound)
-    ok = len(ok_details) >= required_ok
-    if is_dn42 and not ok and tcp_detail.get('ok'):
-        ok = True
-    latency = min(latency_values) if latency_values else tcp_latency
-    return ok, latency, details, tcp_latency, tcp_detail
+    latency = tcp_latency if tcp_detail.get('ok') else None
+    details = [{
+        'url': 'tcp://' + str(tcp_detail.get('address') or outbound.get('address') or '') + ':' + str(tcp_detail.get('port') or outbound.get('port') or ''),
+        'ok': bool(tcp_detail.get('ok')),
+        'code': 'tcp_connect',
+        'latency': latency,
+        'latency_ms': tcp_detail.get('latency_ms'),
+        'error': tcp_detail.get('error') or '',
+        'elapsed': latency,
+    }]
+    return bool(tcp_detail.get('ok')), latency, details, tcp_latency, tcp_detail
 
 
 def merge_status(outbound, old, now):
