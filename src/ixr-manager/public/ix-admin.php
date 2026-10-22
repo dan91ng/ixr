@@ -243,7 +243,8 @@ function buildPanelData(): array
         body.ix-admin-integrated .node-type-badge.ix { background:#ede9fe; color:#6d28d9; border:1px solid #ddd6fe; }
         body.ix-admin-integrated .node-type-badge.ixr { background:#dbeafe; color:#1d4ed8; border:1px solid #bfdbfe; }
         @media (max-width: 900px) { body.ix-admin-integrated .ix-hero-inner { flex-direction:column; align-items:flex-start; } body.ix-admin-integrated .ix-toolbar { justify-content:flex-start; } body.ix-admin-integrated .ix-action-label { display:none; } }
-    </style>
+    .ix-export-settings{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:20px}.ix-export-field{display:flex;flex-direction:column;min-width:0}.ix-export-input{height:48px;box-sizing:border-box}.ix-export-save{margin-top:12px;min-height:46px;width:100%;display:flex;align-items:center;justify-content:center;white-space:nowrap}.ix-export-save:disabled{opacity:.6;cursor:wait}@media(max-width:600px){.ix-export-settings{grid-template-columns:1fr;gap:24px}}
+</style>
 </head>
 <body class="text-slate-800 antialiased selection:bg-indigo-100 selection:text-indigo-900 pb-16 relative ix-admin-integrated" data-embedded="<?=isset($_GET['embedded']) ? '1' : '0'?>">
 
@@ -288,30 +289,20 @@ function buildPanelData(): array
         <!-- 左侧：节点与路由区 (比例 7) -->
         <div class="xl:col-span-7 space-y-6">
 
-            <div class="ix-card bg-white p-6 rounded-2xl min-h-[154px] flex flex-col justify-between shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
-                <div class="flex items-center justify-between gap-3 mb-5">
-                    <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-link mr-2 text-indigo-500 bg-indigo-50 p-2 rounded-lg"></i>新增出口节点</h3>
-                    <button type="button" onclick="openCreateNodeModal()" class="text-sm font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 px-4 py-2 rounded-xl transition"><i class="fa-solid fa-sliders mr-2"></i>手动新增</button>
+            <div class="ix-card bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+                <div class="ix-export-settings">
+                    <div class="ix-export-field">
+                        <h3 class="font-bold text-slate-800 text-lg flex items-center mb-4"><i class="fa-solid fa-globe mr-2 text-emerald-500 bg-emerald-50 p-2 rounded-lg"></i>导出连接地址</h3>
+                        <input type="text" id="frontEntryHostInput" placeholder="填写前置转发域名或 IP" class="ix-export-input w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm shadow-inner">
+                        <button type="button" onclick="saveFrontEntryHostFromInput()" class="ix-export-save bg-indigo-600 text-white px-5 py-3 rounded-xl hover:bg-indigo-700 transition shadow-md font-bold"><i class="fa-solid fa-floppy-disk mr-2"></i>保存地址</button>
+                    </div>
+                    <div class="ix-export-field">
+                        <h3 class="font-bold text-slate-800 text-lg flex items-center mb-4"><i class="fa-solid fa-satellite-dish mr-2 text-indigo-500 bg-indigo-50 p-2 rounded-lg"></i>监听端口</h3>
+                        <input type="number" id="sharedInboundPortInput" min="1" max="65535" step="1" placeholder="1–65535" aria-label="Xray 共享监听端口" class="ix-export-input w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm shadow-inner">
+                        <button type="button" id="saveSharedInboundPortBtn" onclick="saveSharedInboundPort()" class="ix-export-save bg-indigo-600 text-white px-5 py-3 rounded-xl hover:bg-indigo-700 transition shadow-md font-bold"><i class="fa-solid fa-floppy-disk mr-2"></i>保存端口</button>
+                    </div>
                 </div>
-                <div class="flex gap-3 relative">
-                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><i class="fa-solid fa-paste text-slate-400"></i></div>
-                    <input type="text" id="vmessInput" placeholder="在此粘贴 vmess:// 链接..." class="flex-1 bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-3 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm shadow-inner">
-                    <button id="addNodeBtn" type="button" onclick="addNode(event)" class="bg-slate-800 text-white px-8 py-3 rounded-xl hover:bg-slate-700 transition shadow-md font-medium whitespace-nowrap flex items-center">
-                        <i class="fa-solid fa-plus mr-2"></i>添加
-                    </button>
-                </div>
-                <label class="mt-4 flex items-center gap-3 text-sm font-bold text-slate-700 cursor-pointer w-fit">
-                    <input type="checkbox" id="importEnableIx" checked class="w-4 h-4 accent-indigo-600">
-                    <span>同时加入 IX 线路并生成前端连接</span>
-                </label>
-                <div class="flex flex-wrap items-end gap-3">
-                    <label class="flex-1 min-w-[140px] text-sm font-bold text-slate-700">监听端口
-                        <input type="number" id="sharedInboundPortInput" min="1" max="65535" step="1" placeholder="1–65535" class="mt-2 w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm">
-                    </label>
-                    <button type="button" id="saveSharedInboundPortBtn" onclick="saveSharedInboundPort()" class="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold">保存端口</button>
-                    <p class="w-full text-xs text-slate-500">修改实际 Xray 共享监听端口并同步线路导出端口；不影响 Web 端口。请同步调整防火墙及前置转发。</p>
-                </div>
-                </div>
+                <p class="text-xs text-slate-500 mt-4">监听端口用于 Xray 共享入站，不影响 Web；保存后请同步调整防火墙及前置转发。</p>
             </div>
 
             <div class="ix-card bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow flex flex-col">
@@ -341,8 +332,7 @@ function buildPanelData(): array
                 <div class="flex items-center justify-between mb-5">
                     <h3 class="font-bold text-slate-800 text-lg flex items-center"><i class="fa-solid fa-globe mr-2 text-emerald-500 bg-emerald-50 p-2 rounded-lg"></i>导出连接地址</h3>
                 </div>
-                <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(140px,180px);gap:16px;align-items:start">
-                <div class="grid grid-cols-1 gap-3">
+                <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
                     <input type="text" id="frontEntryHostInput" placeholder="填写前置转发域名或 IP" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm shadow-inner">
                     <button onclick="saveFrontEntryHostFromInput()" class="self-end bg-indigo-600 text-white px-6 py-3 rounded-xl hover:bg-indigo-700 transition shadow-md font-bold whitespace-nowrap flex items-center justify-center">
                         <i class="fa-solid fa-floppy-disk mr-2"></i>保存地址
