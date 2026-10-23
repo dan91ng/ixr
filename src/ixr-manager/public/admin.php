@@ -154,10 +154,28 @@ function remove_outbound_references(&$state,$name){
   }
   unset($port);
 }
+function validate_ip_rule_input($text){
+  $result=[];
+  foreach(preg_split('/\r\n|\r|\n/',trim((string)$text)) as $line){
+    $line=trim($line); if($line==='') continue;
+    if(preg_match('/^IP-CIDR6?\s*,\s*([^,]+)(?:\s*,\s*no-resolve)?$/i',$line,$m)) $line=trim($m[1]);
+    foreach(preg_split('/[,\s]+/',$line) as $item){
+      if($item==='*' || preg_match('/^(?:ext-ip:[^\s,]+|geoip:[!A-Za-z0-9_.@-]+)$/',$item)){ $result[]=$item; continue; }
+      $parts=explode('/',$item);
+      $is4=filter_var($parts[0],FILTER_VALIDATE_IP,FILTER_FLAG_IPV4)!==false;
+      $is6=filter_var($parts[0],FILTER_VALIDATE_IP,FILTER_FLAG_IPV6)!==false;
+      if((!$is4 && !$is6) || count($parts)>2 || (isset($parts[1]) && (!ctype_digit($parts[1]) || intval($parts[1])>($is4?32:128))))
+        throw new InvalidArgumentException('IP 匹配格式错误：'.$item.'。请填写 IP/CIDR、geoip:名称，或每行 IP-CIDR,网段。');
+      $result[]=$item;
+    }
+  }
+  return implode("\n",array_values(array_unique($result)));
+}
+
 function normalize_rule($rule){
   if(!is_array($rule)) $rule=[];
   $id=trim((string)($rule['id'] ?? ''));
-  if($id==='' || !preg_match('/^[A-Za-z0-9_.:-]{6,80}$/',$id)) $id=new_rule_id();
+  if($id==='') $id=new_rule_id();
   return ['id'=>$id,'name'=>strval($rule['name'] ?? '自定义规则'),'domains'=>strval($rule['domains'] ?? ''),'ips'=>strval($rule['ips'] ?? ''),'outbound'=>strval($rule['outbound'] ?? '')];
 }
 function find_rule_index($rules,$ruleId,$fallbackIdx=-1){
@@ -293,7 +311,10 @@ $adminCsrf=ixr_csrf_token();
 
 $syncMsg='';
 sync_outbounds($syncMsg);
+$rawState=load_json($stateFile,['ports'=>[]]);
 $state=normalize_state(load_json($stateFile,['ports'=>[]]));
+$missingRuleIds=false; foreach(($rawState['ports'] ?? []) as $rp){ foreach(($rp['rules'] ?? []) as $rr){ if(empty($rr['id'])) $missingRuleIds=true; } }
+if($missingRuleIds) save_state($state);
 $outs=normalize_custom_outbounds(load_json($outFile,[]));
 $localIps=discover_local_ips();
 $customOuts=$outs;
@@ -303,6 +324,11 @@ $export=normalize_export(load_json($exportFile,[]));
 if($_SERVER['REQUEST_METHOD']==='POST' && empty($_POST['login_act'])){
   $act=$_POST['act'] ?? '';
   $targetPort=intval($_POST['port'] ?? 0);
+  if(in_array($act,['add_rule','save_rule'],true)){
+    try { $_POST['ips']=validate_ip_rule_input($_POST['ips'] ?? ''); }
+    catch(Throwable $error){ set_flash('规则未保存',$error->getMessage(),'warn'); redirect_back($targetPort,'ports'); }
+  }
+
   $needsApply=false; $applyPrefix=''; $redirectSection=$_POST['section'] ?? 'ports'; $redirectParams=[];
   if(!in_array($redirectSection,$allowed,true)) $redirectSection='ports';
   if($act==='change_admin_password'){
